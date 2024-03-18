@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nINSERT INTO mathematicians(id, first_name, last_name, dissertation)\nVALUES($1, $2, $3, $4)\nON CONFLICT(id)\n    DO UPDATE SET\n        first_name   = EXCLUDED.first_name,\n        last_name    = EXCLUDED.last_name,\n        dissertation = EXCLUDED.dissertation;",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Varchar",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0fdb990ee871c381bf547d230c1454782b35f0a7c6014b4e85124e4a14455d5"
+}
