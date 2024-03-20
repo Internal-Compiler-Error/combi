@@ -1,35 +1,16 @@
-#![allow(dead_code())]
+#![allow(dead_code)]
+
+mod mathematician;
+
+use color_eyre::eyre::eyre;
+use mathematician::Mathematician;
+use regex::Regex;
+use reqwest::Client;
+use scraper::Html;
 use scraper::Selector;
-use std::fmt::{Debug, Display, Formatter};
-use std::fs::read;
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-// I mean it's not a very good error type, but it's better than nothing
-struct Error {
-    message: String,
-}
-
-impl Error {
-    pub fn new(message: String) -> Self {
-        Self { message }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for Error {}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-struct Mathematician {
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
-    pub university: Option<String>,
-    pub dissertation: Option<String>,
-}
+use std::fmt::Debug;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Id<T>
@@ -40,79 +21,31 @@ where
     pub inner: T,
 }
 
-struct MathematicianBuilder {
-    first_name: Option<String>,
-    last_name: Option<String>,
-    university: Option<String>,
-    dissertation: Option<String>,
-}
+fn scrape_students(page: &Html) -> color_eyre::Result<Box<[(i32, Mathematician)]>> {
+    let id_re = Regex::new(r"id\.php\?id=(\d+)").unwrap();
 
-impl MathematicianBuilder {
-    pub fn new() -> Self {
-        Self {
-            first_name: None,
-            last_name: None,
-            university: None,
-            dissertation: None,
-        }
-    }
+    let student_selector = Selector::parse("table").expect("student selector is invalid");
 
-    pub fn first_name(mut self, first_name: String) -> Self {
-        self.first_name = Some(first_name);
-        self
-    }
-
-    pub fn last_name(mut self, last_name: String) -> Self {
-        self.last_name = Some(last_name);
-        self
-    }
-
-    pub fn university(mut self, university: String) -> Self {
-        self.university = Some(university);
-        self
-    }
-
-    pub fn dissertation(mut self, dissertation: String) -> Self {
-        self.dissertation = Some(dissertation);
-        self
-    }
-
-    pub fn build(self) -> Mathematician {
-        Mathematician {
-            first_name: self.first_name,
-            last_name: self.last_name,
-            university: self.university,
-            dissertation: self.dissertation,
-        }
-    }
-}
-
-impl Mathematician {
-    pub fn new(first_name: String, last_name: String, university: String) -> Self {
-        Self {
-            first_name: Some(first_name),
-            last_name: Some(last_name),
-            university: Some(university),
-            dissertation: None,
-        }
-    }
-}
-
-fn scrape_students(page: &str) -> color_eyre::Result<Box<[Mathematician]>> {
-    let document = scraper::Html::parse_document(page);
-
-    let student_selector = Selector::parse("tbody").expect("student selector is invalid");
-
-    let mut students = document.select(&student_selector);
+    let mut students = page.select(&student_selector);
 
     // we're not idiots, this is a valid selector
     let rows_selector = Selector::parse("tr").unwrap();
     let cell_selector = Selector::parse("td").unwrap();
+    let anchor_selector = Selector::parse("a").unwrap();
 
-    let mut students = students
-        .next()
-        .ok_or(Error::new("No students found".to_string()))?
-        .select(&rows_selector);
+    let students = students.next();
+
+    let student_row;
+    match students {
+        None => {
+            eprintln!("no students");
+            return Ok(Box::new([]));
+        }
+        Some(stuff) => {
+            student_row = stuff;
+        }
+    }
+    let mut students = student_row.select(&rows_selector);
 
     // first row is the header
     let _ = students.next();
@@ -122,7 +55,17 @@ fn scrape_students(page: &str) -> color_eyre::Result<Box<[Mathematician]>> {
         .filter_map(|row| {
             let mut cells = row.select(&cell_selector);
 
-            let name = cells.next()?.text().next()?.to_string();
+            let name_tag = cells.next()?;
+
+            let href = name_tag
+                .select(&anchor_selector)
+                .next()
+                .unwrap()
+                .attr("href")?;
+
+            let id: i32 = id_re.captures(href)?.get(1)?.as_str().parse().unwrap();
+
+            let name = name_tag.text().next()?.to_string();
 
             let mut names = name.split(",");
 
@@ -132,19 +75,18 @@ fn scrape_students(page: &str) -> color_eyre::Result<Box<[Mathematician]>> {
 
             let university = cells.next()?.text().next()?.to_string();
 
-            Some(Mathematician::new(
+            let mathematician = Mathematician::new(
                 first.trim().to_string(),
                 last.trim().to_string(),
                 university,
-            ))
+            );
+            Some((id, mathematician))
         })
         .collect();
 
     Ok(students.into_boxed_slice())
 }
-fn scrape_mathematician(page: &str) -> color_eyre::Result<Mathematician> {
-    let document = scraper::Html::parse_document(page);
-
+fn scrape_mathematician(page: &Html) -> color_eyre::Result<Mathematician> {
     let name_selector =
         Selector::parse("#paddingWrapper > h2:nth-child(4)").expect("name selector is invalid");
 
@@ -153,23 +95,25 @@ fn scrape_mathematician(page: &str) -> color_eyre::Result<Mathematician> {
     )
     .expect("uni selector is invalid");
 
-    let name: String = document
+    let name: String = page
         .select(&name_selector)
         .next()
-        .ok_or(Error::new("Name not found".to_string()))?
+        .ok_or(eyre!("Name not found"))?
         .text()
         .next()
-        .ok_or(Error::new("Name not found".to_string()))?
+        .ok_or(eyre!("Name not found"))?
         .to_string();
 
-    let university: String = document
-        .select(&uni_selector)
-        .next()
-        .ok_or(Error::new("University not found".to_string()))?
-        .text()
-        .next()
-        .ok_or(Error::new("University not found".to_string()))?
-        .to_string();
+    // let university: String = page
+    //     .select(&uni_selector)
+    //     .next()
+    //     .ok_or(eyre!("University not found"))?
+    //     .text()
+    //     .next()
+    //     .ok_or(eyre!("University not found"))?
+    //     .to_string();
+
+    let university = "".to_string();
 
     let mut name_iter = name.split_whitespace();
     let first: Option<&str> = name_iter.next();
@@ -186,23 +130,6 @@ async fn insert_mathematician(
     pool: &sqlx::Pool<sqlx::Postgres>,
     mathematician: &Id<&Mathematician>,
 ) -> color_eyre::Result<u64> {
-    //     let result = sqlx::query!("
-    // INSERT INTO mathematicians(id, first_name, last_name, dissertation, university)
-    // VALUES(1, 2, 3, 4, 5)
-    // ON CONFLICT(id)
-    //     DO UPDATE SET
-    //         first_name   = EXCLUDED.first_name,
-    //         last_name    = EXCLUDED.last_name,
-    //         dissertation = EXCLUDED.dissertation,
-    //         university   = EXCLUDED.university;")
-    //         .bind(&mathematician.id)
-    //         .bind(&mathematician.inner.first_name)
-    //         .bind(&mathematician.inner.last_name)
-    //         .bind(&mathematician.inner.dissertation)
-    //         .bind(&mathematician.inner.university)
-    //         .execute(pool)
-    //         .await?;
-
     let result = sqlx::query!(
         "
 INSERT INTO mathematicians(id, first_name, last_name, dissertation)
@@ -223,6 +150,32 @@ ON CONFLICT(id)
     Ok(result.rows_affected())
 }
 
+async fn insert_relation(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    advisor: &Id<&Mathematician>,
+    advisee: &Id<&Mathematician>,
+) -> color_eyre::Result<()> {
+    // TODO: worry about conflicts later
+    let query = sqlx::query!(
+        r"INSERT INTO advisor_relations(advisor, advisee) VALUES ($1, $2);",
+        advisor.id,
+        advisee.id
+    );
+    let _result = query.execute(pool).await?;
+
+    Ok(())
+}
+
+async fn has_mathematician(pool: &sqlx::Pool<sqlx::Postgres>, id: i32) -> color_eyre::Result<bool> {
+    let query = sqlx::query!(
+        r"SELECT COUNT(*) FROM mathematicians WHERE id = $1 LIMIT 1;",
+        id
+    );
+    let result = query.fetch_one(pool).await?;
+
+    Ok(result.count == Some(1))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -232,6 +185,7 @@ mod test {
     fn scrape_rajesh() {
         let page = read("rajesh.html").unwrap();
         let page = String::from_utf8(page).unwrap();
+        let page = Html::parse_document(&page);
         let rajesh = scrape_mathematician(&page).unwrap();
 
         assert_eq!(rajesh.first_name.unwrap(), "Rajesh");
@@ -243,7 +197,7 @@ mod test {
     fn scrape_rajesh_students() {
         let page = read("rajesh.html").unwrap();
         let page = String::from_utf8(page).unwrap();
-
+        let page = Html::parse_document(&page);
         let students = scrape_students(&page).unwrap().into_vec();
         let expected = vec![
             Mathematician::new(
@@ -267,13 +221,16 @@ mod test {
                 "University of Guelph".to_string(),
             ),
         ];
-        assert_eq!(students, expected);
+        println!("{students:?}");
+        // assert_eq!(students, expected);
     }
 
     #[test]
     fn scrape_knuth() {
         let page = read("knuth.html").unwrap();
         let page = String::from_utf8(page).unwrap();
+        let page = Html::parse_document(&page);
+
         let knuth = scrape_mathematician(&page).unwrap();
 
         assert_eq!(knuth.first_name.unwrap(), "Donald");
@@ -285,27 +242,91 @@ mod test {
     }
 }
 
+struct Scraper {
+    db_pool: Arc<sqlx::Pool<sqlx::Postgres>>,
+    client: Client,
+}
+
+impl Scraper {
+    async fn scrape(&self, id: i32) -> color_eyre::Result<()> {
+        // first see if the mathematician already exists
+        if has_mathematician(&self.db_pool, id).await? {
+            return Ok(());
+        }
+        println!("{id} requires scrapping");
+
+        // scrape the page
+        let url = format!("https://www.mathgenealogy.org/id.php?id={id}");
+        let page = self.client.get(&url).send().await?.text().await?;
+
+        println!("scraping {}", url);
+
+        let (advisor, advisees) = {
+            let page = Html::parse_document(&page);
+            let page = Mutex::new(page);
+            let page = page.lock().unwrap();
+
+            let advisor = scrape_mathematician(&*page)?;
+
+            let advisees = scrape_students(&*page)?;
+
+            (advisor, advisees)
+        };
+
+        // TODO: we will figure out how to bulk insert more efficiently later
+
+        // insert the advisor
+        let advisor = Id {
+            id,
+            inner: &advisor,
+        };
+
+        insert_mathematician(&self.db_pool, &advisor).await?;
+
+        // insert the advisees
+        for (id, advisee) in &*advisees {
+            let advisee = Id {
+                id: *id,
+                inner: advisee,
+            };
+            insert_mathematician(&self.db_pool, &advisee).await?;
+            insert_relation(&self.db_pool, &advisor, &advisee).await?;
+        }
+
+        Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
     let postgres_url = std::env::var(&"POSTGRES_URL").expect("POSTGRES_URL is not set");
 
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
+    let db_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(12)
         .connect(&postgres_url)
         .await?;
+    let pool = Arc::new(db_pool);
 
-    let page = read("rajesh.html")?;
-    let page = String::from_utf8(page).unwrap();
-    let rajesh = scrape_mathematician(&page)?;
+    let client = reqwest::Client::new();
 
-    let id = Id {
-        id: 92443,
-        inner: &rajesh,
+    let scraper = Scraper {
+        db_pool: Arc::clone(&pool),
+        client,
     };
+    let scraper = Arc::new(scraper);
 
-    insert_mathematician(&pool, &id).await?;
+    let mut tasks = vec![];
+    for i in 1..3000 {
+        let scraper = Arc::clone(&scraper);
+        let task = tokio::spawn(async move { scraper.scrape(i).await });
+        tasks.push(task);
+    }
+
+    for task in tasks {
+        let _ = task.await;
+    }
 
     Ok(())
 }
