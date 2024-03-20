@@ -1,65 +1,70 @@
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Mathematician {
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
-    pub university: Option<String>,
+    pub name: String,
     pub dissertation: Option<String>,
+    pub year: Option<u16>,
+    pub school: Option<School>,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct School {
+    pub name: String,
+    pub country: Option<String>,
 }
 
 pub struct MathematicianBuilder {
-    first_name: Option<String>,
-    last_name: Option<String>,
-    university: Option<String>,
+    name: String,
     dissertation: Option<String>,
+    year: Option<u16>,
+    school: Option<School>,
 }
 
 impl MathematicianBuilder {
     pub fn new() -> Self {
         Self {
-            first_name: None,
-            last_name: None,
-            university: None,
+            name: String::new(),
             dissertation: None,
+            year: None,
+            school: None,
         }
     }
 
-    pub fn first_name(mut self, first_name: String) -> Self {
-        self.first_name = Some(first_name);
+    pub fn full_name(&mut self, name: String) -> &mut Self {
+        self.name = name;
         self
     }
 
-    pub fn last_name(mut self, last_name: String) -> Self {
-        self.last_name = Some(last_name);
+    pub fn first_name(&mut self, first_name: &str) -> &mut Self {
+        self.name.push_str(&first_name);
         self
     }
 
-    pub fn university(mut self, university: String) -> Self {
-        self.university = Some(university);
+    pub fn last_name(&mut self, last_name: &str) -> &mut Self {
+        self.name.push_str(last_name);
         self
     }
 
-    pub fn dissertation(mut self, dissertation: String) -> Self {
+    pub fn school(&mut self, school: School) -> &mut Self {
+        self.school = Some(school);
+        self
+    }
+
+    pub fn dissertation(&mut self, dissertation: String) -> &mut Self {
         self.dissertation = Some(dissertation);
+        self
+    }
+
+    pub fn year(&mut self, year: u16) -> &mut Self {
+        self.year = Some(year);
         self
     }
 
     pub fn build(self) -> Mathematician {
         Mathematician {
-            first_name: self.first_name,
-            last_name: self.last_name,
-            university: self.university,
+            name: self.name,
+            school: self.school,
             dissertation: self.dissertation,
-        }
-    }
-}
-
-impl Mathematician {
-    pub fn new(first_name: String, last_name: String, university: String) -> Self {
-        Self {
-            first_name: Some(first_name),
-            last_name: Some(last_name),
-            university: Some(university),
-            dissertation: None,
+            year: self.year,
         }
     }
 }
