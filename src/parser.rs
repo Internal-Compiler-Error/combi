@@ -1,4 +1,6 @@
+use crate::mathematician::Country;
 use crate::mathematician::Dissertation;
+use crate::mathematician::GraduationRecord;
 use crate::mathematician::Mathematician;
 use crate::mathematician::School;
 use color_eyre::eyre::eyre;
@@ -7,7 +9,7 @@ use regex::Regex;
 use scraper::Html;
 use scraper::Selector;
 use sqlx::prelude::FromRow;
-use tracing::info;
+use tracing::debug;
 use tracing::instrument;
 use tracing::warn;
 
@@ -28,13 +30,35 @@ pub struct ScrapeRecord {
     pub mathematician: Mathematician,
     pub students_ids: Vec<i32>,
     pub dissertation: Option<Dissertation>,
+    pub graduation_record: Option<GraduationRecord>,
 }
 
 pub fn scrape(page: &Html) -> color_eyre::Result<ScrapeRecord> {
     let mathematician = scrape_mathematician(page)?;
     let dissertation_title = scrape_dissertation(page);
-    let students = scrape_students(page)?;
-    todo!()
+    let student_ids = scrape_students(page)?;
+
+    let university = parse_school(page);
+    let year = parse_year(page);
+    let graduation_record = match (university, year) {
+        (Some((school, country)), Some(year)) => Some(GraduationRecord {
+            mathematician: mathematician.clone(),
+            country,
+            school,
+            year,
+        }),
+        _ => None,
+    };
+
+    Ok(ScrapeRecord {
+        mathematician: mathematician.clone(),
+        students_ids: student_ids,
+        dissertation: dissertation_title.map(|t| Dissertation {
+            title: t.to_string(),
+            author: mathematician,
+        }),
+        graduation_record,
+    })
 }
 
 pub fn scrape_dissertation(page: &Html) -> Option<&str> {
@@ -47,7 +71,7 @@ pub fn scrape_dissertation(page: &Html) -> Option<&str> {
     }
 }
 
-pub fn scrape_students(page: &Html) -> color_eyre::Result<Box<[(i32, Mathematician)]>> {
+pub fn scrape_students(page: &Html) -> color_eyre::Result<Vec<i32>> {
     let id_re = Regex::new(r"id\.php\?id=(\d+)").unwrap();
 
     let student_selector = Selector::parse("table").expect("student selector is invalid");
@@ -59,8 +83,8 @@ pub fn scrape_students(page: &Html) -> color_eyre::Result<Box<[(i32, Mathematici
     let student_row;
     match students {
         None => {
-            info!("no students");
-            return Ok(Box::new([]));
+            debug!("no students");
+            return Ok(vec![]);
         }
         Some(stuff) => {
             student_row = stuff;
@@ -84,27 +108,27 @@ pub fn scrape_students(page: &Html) -> color_eyre::Result<Box<[(i32, Mathematici
                 .unwrap()
                 .attr("href")?;
 
-            let id: i32 = id_re.captures(href)?.get(1)?.as_str().parse().unwrap();
+            id_re.captures(href)?.get(1)?.as_str().parse().ok()
 
-            let name = name_tag.text().next()?;
+            // let name = name_tag.text().next()?;
+            //
+            // let name = parse_name(name);
+            //
+            // let university = cells.next()?.text().next()?.to_string();
+            //
+            // let mut builder = MathematicianBuilder::new();
+            // builder.full_name(name).school(School {
+            //     name: university,
+            //     country: None,
+            // });
+            //
+            // let mathematician = builder.build();
 
-            let name = parse_name(name);
-
-            let university = cells.next()?.text().next()?.to_string();
-
-            let mut builder = MathematicianBuilder::new();
-            builder.full_name(name).school(School {
-                name: university,
-                country: None,
-            });
-
-            let mathematician = builder.build();
-
-            Some((id, mathematician))
+            // Some((id, mathematician))
         })
         .collect();
 
-    Ok(students.into_boxed_slice())
+    Ok(students)
 }
 
 fn parse_name(name: &str) -> String {
@@ -153,11 +177,11 @@ pub fn scrape_mathematician(page: &Html) -> color_eyre::Result<Mathematician> {
     //     builder.dissertation(thesis.to_string());
     // }
 
-    let year = parse_year(page);
+    // let year = parse_year(page);
     Ok(Mathematician {
         id: 0,
         name: full_name,
-        year,
+        // year,
     })
 }
 
@@ -167,7 +191,7 @@ fn parse_country(page: &Html) -> Option<&str> {
     Some(country)
 }
 
-fn parse_school(page: &Html) -> Option<School> {
+fn parse_school(page: &Html) -> Option<(School, Option<Country>)> {
     // the university is next to the the span that contains 'Ph.D. ' (yes they have a stupid space
     // in there)
     let name = page
@@ -179,12 +203,16 @@ fn parse_school(page: &Html) -> Option<School> {
         .next()?
         .trim();
 
-    let country = parse_country(page).map(|c| c.to_string());
+    let country = parse_country(page).map(|c| Country {
+        name: c.to_string(),
+    });
 
-    Some(School {
-        name: name.to_string(),
+    Some((
+        School {
+            name: name.to_string(),
+        },
         country,
-    })
+    ))
 }
 
 fn parse_year(page: &Html) -> Option<u16> {

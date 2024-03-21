@@ -4,14 +4,17 @@ mod mathematician;
 mod parser;
 
 use color_eyre::eyre::eyre;
+use mathematician::Country;
+use mathematician::Dissertation;
+use mathematician::GraduationRecord;
 use mathematician::Mathematician;
+use mathematician::School;
 use rand_distr::Distribution;
 use rand_distr::Normal;
 use reqwest::Client;
 use scraper::Html;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::debug;
@@ -28,78 +31,82 @@ where
     pub inner: T,
 }
 
-async fn insert_mathematician(
+async fn insert_school(
     pool: &sqlx::Pool<sqlx::Postgres>,
-    mathematician: &Id<&Mathematician>,
+    school: &School,
 ) -> color_eyre::Result<()> {
-    let school = mathematician.inner.school.as_ref();
-
     let _ = sqlx::query!(
-        r#"
-WITH s AS (
-    INSERT INTO school (name, country) 
-    VALUES ($1, $2) 
-    ON CONFLICT(id) DO NOTHING
-    RETURNING id
-)
-INSERT INTO mathematicians(id, name, dissertation, year, school)
-SELECT $3, $4, $5, $6, s.id
-FROM s
-ON CONFLICT (id) DO UPDATE SET 
-    name = EXCLUDED.name,
-    dissertation = EXCLUDED.dissertation,
-    year = EXCLUDED.year,
-    school = EXCLUDED.school;"#,
-        school.clone().as_ref().map(|s| &s.name),
-        school.clone().as_ref().and_then(|s| s.country.clone()),
-        mathematician.id,
-        mathematician.inner.name,
-        mathematician.inner.dissertation,
-        mathematician.inner.year.map(|x| x as i16)
+        "INSERT INTO schools(name) VALUES ($1) ON CONFLICT DO NOTHING;",
+        school.name,
     )
     .execute(pool)
     .await?;
-    //
-    // let mut transaction = pool.begin().await?;
-    //
-    // if let Some(ref inner) = mathematician.inner.school {
-    //     // insert the school first
-    //     let school_id = sqlx::query!(
-    //         "INSERT INTO school(name, country) VALUES ($1, $2) RETURNING id",
-    //         inner.name,
-    //         inner.country
-    //     )
-    //     .fetch_one(&mut *transaction)
-    //     .await?;
-    //
-    //     sqlx::query!("INSERT INTO mathematicians (id, name, school, dissertation, year) VALUES ($1, $2, $3, $4, $5);",
-    //             mathematician.id,
-    //             mathematician.inner.name,
-    //             school_id.id,
-    //             mathematician.inner.dissertation,
-    //             mathematician.inner.year.map(|x| x as i16)).execute(&mut *transaction).await?;
-    // } else {
-    //     sqlx::query!(
-    //         "INSERT INTO mathematicians (id, name, dissertation, year) VALUES ($1, $2, $3, $4)",
-    //         mathematician.id,
-    //         mathematician.inner.name,
-    //         mathematician.inner.dissertation,
-    //         mathematician.inner.year.map(|x| x as i16)
-    //     )
-    //     .execute(&mut *transaction)
-    //     .await?;
-    // }
-    //
-    // transaction.commit().await?;
+
+    Ok(())
+}
+
+async fn insert_country(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    country: &Country,
+) -> color_eyre::Result<()> {
+    let _ = sqlx::query!(
+        "INSERT INTO countries(name) VALUES ($1) ON CONFLICT DO NOTHING;",
+        country.name,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn insert_dissertation(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    dissertation: &Dissertation,
+) -> color_eyre::Result<()> {
+    let _ = sqlx::query!(
+        "INSERT INTO dissertations(title, author) VALUES ($1, $2) ON CONFLICT DO NOTHING;",
+        dissertation.title,
+        dissertation.author.id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn insert_adivsor_relation(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    advisor: &Mathematician,
+    advisee: &Mathematician,
+) -> color_eyre::Result<()> {
+    let _ = sqlx::query!(
+        "INSERT INTO advisor_relations(advisor, advisee) VALUES ($1, $2) ON CONFLICT DO NOTHING;",
+        advisor.id,
+        advisee.id
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn insert_mathematician(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    mathematician: &Mathematician,
+) -> color_eyre::Result<()> {
+    let _ = sqlx::query!(
+        "INSERT INTO mathematicians(name) VALUES ($1) ON CONFLICT DO NOTHING;",
+        mathematician.name,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
 async fn insert_relation(
     pool: &sqlx::Pool<sqlx::Postgres>,
-    advisor: &Id<&Mathematician>,
-    advisee: &Id<&Mathematician>,
+    advisor: &Mathematician,
+    advisee: &Mathematician,
 ) -> color_eyre::Result<()> {
-    // TODO: worry about conflicts later
     let query = sqlx::query!(
         r"INSERT INTO advisor_relations(advisor, advisee) VALUES ($1, $2);",
         advisor.id,
@@ -107,6 +114,23 @@ async fn insert_relation(
     );
     let _result = query.execute(pool).await?;
 
+    Ok(())
+}
+
+async fn insert_grad_record(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    grad_record: &GraduationRecord,
+) -> color_eyre::Result<()> {
+    insert_school(pool, &grad_record.school).await?;
+
+    let _ = sqlx::query!(
+        "INSERT INTO graduation_records(mathematician, school, year) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING;",
+        &grad_record.mathematician.id,
+        grad_record.school.name,
+        grad_record.year as i16,
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -120,6 +144,29 @@ async fn has_mathematician(pool: &sqlx::Pool<sqlx::Postgres>, id: i32) -> color_
     Ok(result.count == Some(1))
 }
 
+async fn insert_record(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    advisor: &parser::ScrapeRecord,
+    advisees: &[parser::ScrapeRecord],
+) -> color_eyre::Result<()> {
+    insert_mathematician(pool, &advisor.mathematician).await?;
+
+    if let Some(dissertation) = &advisor.dissertation {
+        insert_dissertation(pool, &dissertation).await?;
+    }
+
+    if let Some(record) = &advisor.graduation_record {
+        insert_grad_record(pool, &record).await?;
+    }
+
+    for advisee in &advisees {
+        insert_mathematician(pool, &advisee.mathematician).await?;
+        insert_adivsor_relation(pool, &advisor.mathematician, &advisee.mathematician).await?;
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 struct Scraper {
     db_pool: Arc<sqlx::Pool<sqlx::Postgres>>,
@@ -128,30 +175,22 @@ struct Scraper {
 
 impl Scraper {
     #[instrument]
-    async fn scrape(&self, id: i32) -> color_eyre::Result<()> {
-        // first see if the mathematician already exists
-        if has_mathematician(&self.db_pool, id).await? {
-            return Ok(());
-        }
-        debug!("{id} requires scrapping");
-
-        // scrape the page
-        let url = format!("https://www.mathgenealogy.org/id.php?id={id}");
-
-        async fn get(client: &Client, url: &str) -> color_eyre::Result<String> {
+    async fn get_page(&self, url: &str) -> color_eyre::Result<Html> {
+        async fn get_page(client: &Client, url: &str) -> color_eyre::Result<String> {
             Ok(client.get(url).send().await?.text().await?)
         }
 
         let mut retry = 3;
         let page = loop {
             if retry == 0 {
+                warn!("Failed to get {url} after 3 tries");
                 return Err(eyre!("Failed to get page"));
             }
 
-            match get(&self.client, &url).await {
+            match get_page(&self.client, &url).await {
                 Ok(page) => break page,
                 Err(e) => {
-                    warn!("Failed to get page: {e}");
+                    debug!("Failed to get page: {e}");
 
                     let factor = {
                         let dist = Normal::new(1.0, 2.0).unwrap();
@@ -169,40 +208,38 @@ impl Scraper {
             }
         };
 
+        Ok(Html::parse_document(&page))
+    }
+
+    #[instrument]
+    async fn scrape(&self, id: i32) -> color_eyre::Result<()> {
+        // first see if the mathematician already exists
+        if has_mathematician(&self.db_pool, id).await? {
+            return Ok(());
+        }
+        debug!("{id} requires scrapping");
+
+        // scrape the page
+        let url = format!("https://www.mathgenealogy.org/id.php?id={id}");
+
         info!("scraping {}", url);
-
-        let (advisor, advisees) = {
-            let page = Html::parse_document(&page);
-            let page = Mutex::new(page);
-            let page = page.lock().unwrap();
-
-            let advisor = parser::scrape_mathematician(&*page)?;
-
-            let advisees = parser::scrape_students(&*page)?;
-
-            (advisor, advisees)
+        let advisor = {
+            let page = self.get_page(&url).await?;
+            parser::scrape(&page)?
         };
 
-        // TODO: we will figure out how to bulk insert more efficiently later
+        let mut advisees = vec![];
+        // visit all the students
+        for student_id in &advisor.students_ids {
+            let url = format!("https://www.mathgenealogy.org/id.php?id={student_id}");
+            let student_page = self.get_page(&url).await?;
+            let student = parser::scrape(&student_page)?;
 
-        // insert the advisor
-        let advisor = Id {
-            id,
-            inner: &advisor,
-        };
-
-        insert_mathematician(&self.db_pool, &advisor).await?;
-
-        // insert the advisees
-        for (id, advisee) in &*advisees {
-            let advisee = Id {
-                id: *id,
-                inner: advisee,
-            };
-            insert_mathematician(&self.db_pool, &advisee).await?;
-            insert_relation(&self.db_pool, &advisor, &advisee).await?;
+            // we only explore one layer deep
+            advisees.push(student);
         }
 
+        insert_record(&self.db_pool, &advisor, advisees.as_slice()).await?;
         Ok(())
     }
 }
