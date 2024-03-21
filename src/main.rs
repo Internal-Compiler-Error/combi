@@ -32,37 +32,65 @@ async fn insert_mathematician(
     pool: &sqlx::Pool<sqlx::Postgres>,
     mathematician: &Id<&Mathematician>,
 ) -> color_eyre::Result<()> {
-    let mut transaction = pool.begin().await?;
+    let school = mathematician.inner.school.as_ref();
 
-    if let Some(ref inner) = mathematician.inner.school {
-        // insert the school first
-        let school_id = sqlx::query!(
-            "INSERT INTO school(name, country) VALUES ($1, $2) RETURNING id",
-            inner.name,
-            inner.country
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-
-        sqlx::query!("INSERT INTO mathematicians (id, name, school, dissertation, year) VALUES ($1, $2, $3, $4, $5);",
-                mathematician.id,
-                mathematician.inner.name,
-                school_id.id,
-                mathematician.inner.dissertation,
-                mathematician.inner.year.map(|x| x as i16)).execute(&mut *transaction).await?;
-    } else {
-        sqlx::query!(
-            "INSERT INTO mathematicians (id, name, dissertation, year) VALUES ($1, $2, $3, $4)",
-            mathematician.id,
-            mathematician.inner.name,
-            mathematician.inner.dissertation,
-            mathematician.inner.year.map(|x| x as i16)
-        )
-        .execute(&mut *transaction)
-        .await?;
-    }
-
-    transaction.commit().await?;
+    let _ = sqlx::query!(
+        r#"
+WITH s AS (
+    INSERT INTO school (name, country) 
+    VALUES ($1, $2) 
+    ON CONFLICT(id) DO NOTHING
+    RETURNING id
+)
+INSERT INTO mathematicians(id, name, dissertation, year, school)
+SELECT $3, $4, $5, $6, s.id
+FROM s
+ON CONFLICT (id) DO UPDATE SET 
+    name = EXCLUDED.name,
+    dissertation = EXCLUDED.dissertation,
+    year = EXCLUDED.year,
+    school = EXCLUDED.school;"#,
+        school.clone().as_ref().map(|s| &s.name),
+        school.clone().as_ref().and_then(|s| s.country.clone()),
+        mathematician.id,
+        mathematician.inner.name,
+        mathematician.inner.dissertation,
+        mathematician.inner.year.map(|x| x as i16)
+    )
+    .execute(pool)
+    .await?;
+    //
+    // let mut transaction = pool.begin().await?;
+    //
+    // if let Some(ref inner) = mathematician.inner.school {
+    //     // insert the school first
+    //     let school_id = sqlx::query!(
+    //         "INSERT INTO school(name, country) VALUES ($1, $2) RETURNING id",
+    //         inner.name,
+    //         inner.country
+    //     )
+    //     .fetch_one(&mut *transaction)
+    //     .await?;
+    //
+    //     sqlx::query!("INSERT INTO mathematicians (id, name, school, dissertation, year) VALUES ($1, $2, $3, $4, $5);",
+    //             mathematician.id,
+    //             mathematician.inner.name,
+    //             school_id.id,
+    //             mathematician.inner.dissertation,
+    //             mathematician.inner.year.map(|x| x as i16)).execute(&mut *transaction).await?;
+    // } else {
+    //     sqlx::query!(
+    //         "INSERT INTO mathematicians (id, name, dissertation, year) VALUES ($1, $2, $3, $4)",
+    //         mathematician.id,
+    //         mathematician.inner.name,
+    //         mathematician.inner.dissertation,
+    //         mathematician.inner.year.map(|x| x as i16)
+    //     )
+    //     .execute(&mut *transaction)
+    //     .await?;
+    // }
+    //
+    // transaction.commit().await?;
     Ok(())
 }
 

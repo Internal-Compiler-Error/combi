@@ -1,11 +1,12 @@
+use crate::mathematician::Dissertation;
 use crate::mathematician::Mathematician;
-use crate::mathematician::MathematicianBuilder;
 use crate::mathematician::School;
 use color_eyre::eyre::eyre;
 use lazy_static::lazy_static;
 use regex::Regex;
 use scraper::Html;
 use scraper::Selector;
+use sqlx::prelude::FromRow;
 use tracing::info;
 use tracing::instrument;
 use tracing::warn;
@@ -22,7 +23,21 @@ lazy_static! {
     static ref COUNTRY_SELECTOR: Selector = Selector::parse("div > img").unwrap();
 }
 
-pub fn scrape_thesis(page: &Html) -> Option<&str> {
+#[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
+pub struct ScrapeRecord {
+    pub mathematician: Mathematician,
+    pub students_ids: Vec<i32>,
+    pub dissertation: Option<Dissertation>,
+}
+
+pub fn scrape(page: &Html) -> color_eyre::Result<ScrapeRecord> {
+    let mathematician = scrape_mathematician(page)?;
+    let dissertation_title = scrape_dissertation(page);
+    let students = scrape_students(page)?;
+    todo!()
+}
+
+pub fn scrape_dissertation(page: &Html) -> Option<&str> {
     let thesis = page.select(&THESIS_SELECTOR).next()?;
     let thesis = thesis.text().next()?;
 
@@ -81,7 +96,7 @@ pub fn scrape_students(page: &Html) -> color_eyre::Result<Box<[(i32, Mathematici
             builder.full_name(name).school(School {
                 name: university,
                 country: None,
-                });
+            });
 
             let mathematician = builder.build();
 
@@ -114,8 +129,6 @@ fn parse_name(name: &str) -> String {
 
 #[instrument]
 pub fn scrape_mathematician(page: &Html) -> color_eyre::Result<Mathematician> {
-    let mut builder = MathematicianBuilder::new();
-
     let full_name = page
         .select(&NAME)
         .next()
@@ -128,24 +141,24 @@ pub fn scrape_mathematician(page: &Html) -> color_eyre::Result<Mathematician> {
         .collect::<Vec<_>>()
         .join(" ");
 
-    builder.full_name(full_name);
-
-    let school = parse_school(page);
-    if let Some(school) = school {
-        builder.school(school);
-    }
-
-    let thesis = scrape_thesis(page);
-    if let Some(thesis) = thesis {
-        builder.dissertation(thesis.to_string());
-    }
+    // builder.full_name(full_name);
+    //
+    // let school = parse_school(page);
+    // if let Some(school) = school {
+    //     builder.school(school);
+    // }
+    //
+    // let thesis = scrape_dissertation(page);
+    // if let Some(thesis) = thesis {
+    //     builder.dissertation(thesis.to_string());
+    // }
 
     let year = parse_year(page);
-    if let Some(year) = year {
-        builder.year(year);
-    }
-
-    Ok(builder.build())
+    Ok(Mathematician {
+        id: 0,
+        name: full_name,
+        year,
+    })
 }
 
 fn parse_country(page: &Html) -> Option<&str> {
@@ -277,8 +290,8 @@ mod test {
             builder
                 .full_name("George Hutchinson".to_string())
                 .school(School {
-                name:"University of Guelph".to_string(),
-                country: None,
+                    name: "University of Guelph".to_string(),
+                    country: None,
                 });
             builder.build()
         };
@@ -288,8 +301,8 @@ mod test {
             builder
                 .full_name("Jeremy Levick".to_string())
                 .school(School {
-                name:"University of Guelph".to_string(),
-                country: None,
+                    name: "University of Guelph".to_string(),
+                    country: None,
                 });
             builder.build()
         };
@@ -299,8 +312,8 @@ mod test {
             builder
                 .full_name("Preeti Mohindru".to_string())
                 .school(School {
-                name:"University of Guelph".to_string(),
-                country: None,
+                    name: "University of Guelph".to_string(),
+                    country: None,
                 });
             builder.build()
         };
@@ -310,8 +323,8 @@ mod test {
             builder
                 .full_name("Jeffrey Tsang".to_string())
                 .school(School {
-                name:"University of Guelph".to_string(),
-                country: None,
+                    name: "University of Guelph".to_string(),
+                    country: None,
                 });
             builder.build()
         };
@@ -357,11 +370,13 @@ mod test {
         let page = Html::parse_document(&page);
 
         let uni = parse_school(&page).unwrap();
-        assert_eq!(uni, 
+        assert_eq!(
+            uni,
             School {
                 name: "California Institute of Technology".to_string(),
                 country: Some("UnitedStates".to_string()),
-            });
+            }
+        );
     }
 
     #[test]
