@@ -1,8 +1,3 @@
-use crate::mathematician::Country;
-use crate::mathematician::Dissertation;
-use crate::mathematician::GraduationRecord;
-use crate::mathematician::Mathematician;
-use crate::mathematician::School;
 use color_eyre::eyre::eyre;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -10,8 +5,6 @@ use scraper::Html;
 use scraper::Selector;
 use sqlx::prelude::FromRow;
 use tracing::debug;
-use tracing::instrument;
-use tracing::warn;
 
 lazy_static! {
     static ref ID_RE: Regex = Regex::new(r"id\.php\?id=(\d+)").unwrap();
@@ -23,48 +16,77 @@ lazy_static! {
     static ref ANCHOR_SELECTOR: Selector = Selector::parse("a").unwrap();
     static ref THESIS_SELECTOR: Selector = Selector::parse("#thesisTitle").unwrap();
     static ref COUNTRY_SELECTOR: Selector = Selector::parse("div > img").unwrap();
+    static ref TABLE_SECTOR: Selector = Selector::parse("table").unwrap();
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow, Copy, sqlx::Type)]
+pub struct Id(pub i32);
+
+impl Into<i32> for Id {
+    fn into(self) -> i32 {
+        self.0
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
+/// A record of a mathematician and their students
 pub struct ScrapeRecord {
-    /// The main mathematician on the page
-    pub mathematician: Mathematician,
+    /// The name of the main mathematician
+    pub name: String,
 
-    /// A list of students mentored under the main mathematician
-    pub students_ids: Vec<i32>,
+    /// A list of studetns mentored under the main mathematician
+    pub students: Vec<Student>,
 
-    /// The dissertation of the main mathematician
-    pub dissertation: Option<Dissertation>,
+    /// The title of dissertation of the main mathematician
+    pub dissertation: Option<String>,
 
-    ///
-    pub graduation_record: Option<GraduationRecord>,
+    /// The university or equivalent institution where the main mathematician graduated
+    pub school: Option<String>,
+
+    /// The country where the main mathematician graduated
+    pub country: Option<String>,
+
+    /// The year when the main mathematician graduated
+    pub year: Option<i16>,
+
+    /// The title of the degree, such as "Ph.D."
+    pub degree: Option<String>,
 }
 
-pub fn scrape(page: &Html, id: i32) -> color_eyre::Result<ScrapeRecord> {
-    let mathematician = scrape_mathematician(page, id)?;
-    let dissertation_title = scrape_dissertation(page);
-    let student_ids = scrape_students(page)?;
+/// A student of a mathematician
+#[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
+pub struct Student {
+    /// The name of the student
+    pub name: String,
+
+    /// The id of the student as stored in the mathgenealogy database
+    pub id: Option<Id>,
+
+    /// The school where the student graduated
+    pub school: Option<String>,
+
+    /// The year when the student graduated
+    pub year: Option<i16>,
+}
+
+pub fn scrape(page: &Html) -> color_eyre::Result<ScrapeRecord> {
+    let mathematician = scrape_mathematician(page)?;
+    let dissertation = scrape_dissertation(page);
+    let students = scrape_students(page)?;
 
     let university = parse_school(page);
     let year = parse_year(page);
-    let graduation_record = match (university, year) {
-        (Some((school, country)), Some(year)) => Some(GraduationRecord {
-            mathematician: mathematician.clone(),
-            country,
-            school,
-            year,
-        }),
-        _ => None,
-    };
+    let country = parse_country(page);
+    let degree = parse_title(page);
 
     Ok(ScrapeRecord {
-        mathematician: mathematician.clone(),
-        students_ids: student_ids,
-        dissertation: dissertation_title.map(|t| Dissertation {
-            title: t.to_string(),
-            author: mathematician,
-        }),
-        graduation_record,
+        name: mathematician,
+        students,
+        dissertation: dissertation.map(|d| d.to_string()),
+        school: university.map(|s| s.to_string()),
+        country: country.map(|c| c.to_string()),
+        year,
+        degree: degree.map(|d| d.to_string()),
     })
 }
 
@@ -78,60 +100,44 @@ pub fn scrape_dissertation(page: &Html) -> Option<&str> {
     }
 }
 
-pub fn scrape_students(page: &Html) -> color_eyre::Result<Vec<i32>> {
-    let id_re = Regex::new(r"id\.php\?id=(\d+)").unwrap();
+pub fn scrape_students(page: &Html) -> color_eyre::Result<Vec<Student>> {
+    let students = page.select(&TABLE_SECTOR).next();
 
-    let student_selector = Selector::parse("table").expect("student selector is invalid");
-
-    let mut students = page.select(&student_selector);
-
-    let students = students.next();
-
-    let student_row;
-    match students {
+    let entries = match students {
         None => {
             debug!("no students");
             return Ok(vec![]);
         }
-        Some(stuff) => {
-            student_row = stuff;
-        }
-    }
-    let mut students = student_row.select(&ROWS_SELECTOR);
+        Some(x) => x,
+    };
+    let mut students = entries.select(&ROWS_SELECTOR).skip(1); // first row is the header
 
-    // first row is the header
-    let _ = students.next();
-
-    // TODO: filter_map is not exactly the best way to do this
     let students: Vec<_> = students
         .filter_map(|row| {
             let mut cells = row.select(&CELL_SELECTOR);
 
-            let name_tag = cells.next()?;
+            let name = cells.next()?;
 
-            let href = name_tag
-                .select(&ANCHOR_SELECTOR)
+            let href = name.select(&ANCHOR_SELECTOR).next()?.attr("href")?;
+            let id: Option<Id> = ID_RE.captures(href)?.get(1)?.as_str().parse().ok().map(Id);
+
+            let name = parse_name(name.text().next()?);
+
+            fn school(cell: &scraper::ElementRef) -> Option<String> {
+                Some(cell.text().next()?.trim().to_string())
+            }
+            let school = school(&cells.next()?);
+
+            let year: Option<i16> = cells
                 .next()
-                .unwrap()
-                .attr("href")?;
+                .and_then(|cell| cell.text().next()?.trim().parse().ok());
 
-            id_re.captures(href)?.get(1)?.as_str().parse().ok()
-
-            // let name = name_tag.text().next()?;
-            //
-            // let name = parse_name(name);
-            //
-            // let university = cells.next()?.text().next()?.to_string();
-            //
-            // let mut builder = MathematicianBuilder::new();
-            // builder.full_name(name).school(School {
-            //     name: university,
-            //     country: None,
-            // });
-            //
-            // let mathematician = builder.build();
-
-            // Some((id, mathematician))
+            Some(Student {
+                name,
+                id,
+                school,
+                year,
+            })
         })
         .collect();
 
@@ -158,9 +164,8 @@ fn parse_name(name: &str) -> String {
     full
 }
 
-#[instrument]
-pub fn scrape_mathematician(page: &Html, id: i32) -> color_eyre::Result<Mathematician> {
-    let full_name = page
+pub fn scrape_mathematician(page: &Html) -> color_eyre::Result<String> {
+    Ok(page
         .select(&NAME)
         .next()
         .ok_or(eyre!("Name not found"))?
@@ -170,27 +175,7 @@ pub fn scrape_mathematician(page: &Html, id: i32) -> color_eyre::Result<Mathemat
         .trim()
         .split_whitespace()
         .collect::<Vec<_>>()
-        .join(" ");
-
-    // builder.full_name(full_name);
-    //
-    // let school = parse_school(page);
-    // if let Some(school) = school {
-    //     builder.school(school);
-    // }
-    //
-    // let thesis = scrape_dissertation(page);
-    // if let Some(thesis) = thesis {
-    //     builder.dissertation(thesis.to_string());
-    // }
-
-    // let year = parse_year(page);
-    let var_name = Mathematician {
-        id,
-        name: full_name,
-        // year,
-    };
-    Ok(var_name)
+        .join(" "))
 }
 
 fn parse_country(page: &Html) -> Option<&str> {
@@ -199,30 +184,21 @@ fn parse_country(page: &Html) -> Option<&str> {
     Some(country)
 }
 
-fn parse_school(page: &Html) -> Option<(School, Option<Country>)> {
-    // the university is next to the the span that contains 'Ph.D. ' (yes they have a stupid space
-    // in there)
-    let name = page.select(&DIV_SPAN).next()?.text().skip(1).next()?.trim();
-
-    let country = parse_country(page).map(|c| Country {
-        name: c.to_string(),
-    });
-
-    Some((
-        School {
-            name: name.to_string(),
-        },
-        country,
-    ))
+fn parse_title(page: &Html) -> Option<&str> {
+    page.select(&DIV_SPAN).next()?.text().next()
 }
 
-fn parse_year(page: &Html) -> Option<u16> {
+fn parse_school(page: &Html) -> Option<&str> {
+    Some(page.select(&DIV_SPAN).next()?.text().skip(1).next()?.trim())
+}
+
+fn parse_year(page: &Html) -> Option<i16> {
     let phd_section = page.select(&DIV_SPAN).next()?;
     let texts = phd_section.text();
 
     texts
         .map(|t| t.trim())
-        .filter_map(|t| t.parse::<u16>().ok())
+        .filter_map(|t| t.parse::<i16>().ok())
         .next()
 }
 
@@ -230,6 +206,15 @@ fn parse_year(page: &Html) -> Option<u16> {
 mod test {
     use super::*;
     use std::fs::read;
+
+    #[test]
+    fn parse_name_works_for_tai() {
+        let page = read("Tai-Yih.html").unwrap();
+        let page = String::from_utf8(page).unwrap();
+        let page = Html::parse_document(&page);
+        let name = scrape_mathematician(&page).unwrap();
+        assert_eq!(name, "Tai-Yih Tso");
+    }
 
     #[test]
     fn parse_year_works_for_knuth() {
@@ -269,25 +254,21 @@ mod test {
 
         assert_eq!(country, "Canada");
     }
+
     #[test]
     fn scrape_rajesh() {
         let page = read("rajesh.html").unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
-        let rajesh = scrape_mathematician(&page).unwrap();
+        let rajesh = scrape(&page).unwrap();
 
         assert_eq!(rajesh.name, "Rajesh Pereira");
-        assert_eq!(
-            rajesh.school.unwrap(),
-            School {
-                name: "University of Toronto".to_string(),
-                country: Some("Canada".to_string())
-            }
-        );
+        assert_eq!(rajesh.school, Some("University of Toronto".to_string()));
         assert_eq!(
             rajesh.dissertation,
             Some("Trace Vectors in Matrix Analysis".to_string())
         );
+        assert_eq!(rajesh.country, Some("Canada".to_string()));
     }
 
     #[test]
@@ -295,16 +276,10 @@ mod test {
         let page = read("abu.html").unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
-        let abu = scrape_mathematician(&page).unwrap();
+        let abu = scrape(&page).unwrap();
 
-        let expected = Mathematician {
-            name: "Abu Sahl 'Isa ibn Yahya al-Masihi".to_string(),
-            dissertation: None,
-            school: None,
-            year: None,
-        };
-
-        assert_eq!(abu, expected);
+        assert_eq!(abu.name, "Abu Sahl 'Isa ibn Yahya al-Masihi");
+        assert_eq!(abu.dissertation, None);
     }
 
     #[test]
@@ -312,62 +287,37 @@ mod test {
         let page = read("rajesh.html").unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
-        let students = scrape_students(&page).unwrap().into_vec();
+        let students = scrape_students(&page).unwrap();
 
-        let geroge = {
-            let mut builder = MathematicianBuilder::new();
-            builder
-                .full_name("George Hutchinson".to_string())
-                .school(School {
-                    name: "University of Guelph".to_string(),
-                    country: None,
-                });
-            builder.build()
-        };
-
-        let jeremy = {
-            let mut builder = MathematicianBuilder::new();
-            builder
-                .full_name("Jeremy Levick".to_string())
-                .school(School {
-                    name: "University of Guelph".to_string(),
-                    country: None,
-                });
-            builder.build()
-        };
-
-        let preeti = {
-            let mut builder = MathematicianBuilder::new();
-            builder
-                .full_name("Preeti Mohindru".to_string())
-                .school(School {
-                    name: "University of Guelph".to_string(),
-                    country: None,
-                });
-            builder.build()
-        };
-
-        let jeffrey = {
-            let mut builder = MathematicianBuilder::new();
-            builder
-                .full_name("Jeffrey Tsang".to_string())
-                .school(School {
-                    name: "University of Guelph".to_string(),
-                    country: None,
-                });
-            builder.build()
-        };
-
-        let expected = vec![geroge, jeremy, preeti, jeffrey];
-
-        let students = students
-            .iter()
-            .map(|(_, student)| student)
-            .collect::<Vec<_>>();
+        let expected = vec![
+            Student {
+                name: "George Hutchinson".to_string(),
+                id: Some(Id(235835)),
+                school: Some("University of Guelph".to_string()),
+                year: Some(2018),
+            },
+            Student {
+                name: "Jeremy Levick".to_string(),
+                id: Some(Id(197636)),
+                school: Some("University of Guelph".to_string()),
+                year: Some(2015),
+            },
+            Student {
+                name: "Preeti Mohindru".to_string(),
+                id: Some(Id(190371)),
+                school: Some("University of Guelph".to_string()),
+                year: Some(2014),
+            },
+            Student {
+                name: "Jeffrey Tsang".to_string(),
+                id: Some(Id(190372)),
+                school: Some("University of Guelph".to_string()),
+                year: Some(2014),
+            },
+        ];
 
         for (student, expected) in students.iter().zip(expected.iter()) {
-            assert_eq!(student.name, expected.name);
-            assert_eq!(student.school, expected.school);
+            assert_eq!(student, expected)
         }
     }
 
@@ -377,21 +327,19 @@ mod test {
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
 
-        let knuth = scrape_mathematician(&page).unwrap();
+        let knuth = scrape(&page).unwrap();
 
         assert_eq!(knuth.name, "Donald Ervin Knuth");
         assert_eq!(
-            knuth.school.unwrap(),
-            School {
-                name: "California Institute of Technology".to_string(),
-                country: Some("UnitedStates".to_string()),
-            }
+            knuth.school,
+            Some("California Institute of Technology".to_string())
         );
         assert_eq!(
             knuth.dissertation,
             Some("Finite Semifields and Projective Planes".to_string())
         );
     }
+
     #[test]
     fn parse_uni_works_for_knuth() {
         let page = read("knuth.html").unwrap();
@@ -399,13 +347,7 @@ mod test {
         let page = Html::parse_document(&page);
 
         let uni = parse_school(&page).unwrap();
-        assert_eq!(
-            uni,
-            School {
-                name: "California Institute of Technology".to_string(),
-                country: Some("UnitedStates".to_string()),
-            }
-        );
+        assert_eq!(uni, "California Institute of Technology".to_string(),);
     }
 
     #[test]
@@ -415,12 +357,6 @@ mod test {
         let page = Html::parse_document(&page);
 
         let uni = parse_school(&page).unwrap();
-        assert_eq!(
-            uni,
-            School {
-                name: "University of Toronto".to_string(),
-                country: Some("Canada".to_string()),
-            }
-        );
+        assert_eq!(uni, "University of Toronto");
     }
 }
