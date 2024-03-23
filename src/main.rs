@@ -315,144 +315,145 @@ struct Scraper {
     client: Client,
 }
 
-// impl Scraper {
-//     #[instrument(skip(self))]
-//     async fn get_page(&self, url: &str) -> color_eyre::Result<Html> {
-//         async fn get_page(client: &Client, url: &str) -> color_eyre::Result<String> {
-//             Ok(client.get(url).send().await?.text().await?)
-//         }
-//
-//         let mut retry = 3;
-//         let page = loop {
-//             if retry == 0 {
-//                 error!("Failed to get {url} after 3 tries");
-//                 return Err(eyre!("Failed to get {url}"));
-//             }
-//
-//             match get_page(&self.client, &url).await {
-//                 Ok(page) => break page,
-//                 Err(e) => {
-//                     debug!("Failed to get page: {e}");
-//
-//                     let factor = {
-//                         let dist = Uniform::new(10.0, 30.0);
-//                         let mut rng = rand::thread_rng();
-//                         dist.sample(&mut rng)
-//                     };
-//
-//                     let wait_duration = Duration::from_millis((1000. * factor) as u64);
-//
-//                     warn!("{url} Connection failed, waiting for {wait_duration:?}");
-//                     sleep(wait_duration).await;
-//                     retry -= 1;
-//                 }
-//             }
-//         };
-//
-//         Ok(Html::parse_document(&page))
-//     }
-//
-//     #[instrument(skip(self))]
-//     async fn scrape(&self, id: i32) -> color_eyre::Result<()> {
-//         //
-//         // first see if the mathematician already exists
-//         if has_mathematician(&*self.db_pool, id).await? {
-//             return Ok(());
-//         }
-//         info!("Started scraping");
-//
-//         // scrape the page
-//         let url = format!("https://www.mathgenealogy.org/id.php?id={id}");
-//
-//         let advisor = {
-//             let page = self.get_page(&url).await.inspect_err(|e| {
-//                 error!("Failed to get page: {e}");
-//             })?;
-//             let mut advisor = parser::scrape(&page, id).inspect_err(|e| {
-//                 error!("Failed to scrape page: {e}");
-//             })?;
-//
-//             advisor
-//         };
-//         info!("Main mathematician scraped");
-//         insert_mathematician(&*self.db_pool, &advisor.mathematician).await?;
-//
-//         let mut advisees = vec![];
-//         // visit all the students
-//         for student_id in &advisor.students_ids {
-//             if has_mathematician(&*self.db_pool, *student_id).await?
-//                 && has_advisor_advisee(&*self.db_pool, id, *student_id).await?
-//             {
-//                 continue;
-//             }
-//             let url = format!("https://www.mathgenealogy.org/id.php?id={student_id}");
-//             let student_page = self.get_page(&url).await?;
-//             let mut student = parser::scrape(&student_page, *student_id)?;
-//             info!("Student scraped {student_id}");
-//             // student.mathematician.id = *student_id;
-//
-//             //
-//             //
-//             // we only explore one layer deep
-//             //
-//             advisees.push(student);
-//         }
-//
-//         info!("Started transaction");
-//         let transaction = self.db_pool.begin().await?;
-//         insert_record(transaction, &advisor, advisees.as_slice()).await?;
-//         info!("Transaction committed");
-//
-//         Ok(())
-//     }
-// }
-//
-// #[tokio::main]
-// async fn main() -> color_eyre::Result<()> {
-//     // init tracing with fmt substribers
-//     tracing_subscriber::fmt::init();
-//
-//     color_eyre::install()?;
-//
-//     let postgres_url = std::env::var(&"POSTGRES_URL").expect("POSTGRES_URL is not set");
-//
-//     let db_pool = sqlx::postgres::PgPoolOptions::new()
-//         .max_connections(12)
-//         .connect(&postgres_url)
-//         .await?;
-//     let pool = Arc::new(db_pool);
-//
-//     let client = reqwest::Client::new();
-//
-//     let scraper = Scraper {
-//         db_pool: Arc::clone(&pool),
-//         client,
-//     };
-//     let scraper = Arc::new(scraper);
-//
-//     let mut tasks = vec![];
-//     // let mut rng = thread_rng();
-//     // let dist = Uniform::new(0, 307384);
-//
-//     for id in 1..=307433 {
-//         // let id = dist.sample(&mut rng);
-//         let scraper = Arc::clone(&scraper);
-//
-//         if !has_mathematician(&*scraper.db_pool, id).await? {
-//             let task = tokio::spawn(async move { scraper.scrape(id).await });
-//
-//             // sleep for 1 second
-//             let sleep_duration = Duration::from_millis(700);
-//             sleep(sleep_duration).await;
-//             tasks.push(task);
-//         }
-//     }
-//
-//     for task in tasks {
-//         let _ = task.await;
-//     }
-//
-//     Ok(())
-// }
+impl Scraper {
+    #[instrument(skip(self))]
+    async fn get_page(&self, url: &str) -> color_eyre::Result<Html> {
+        async fn get_page(client: &Client, url: &str) -> color_eyre::Result<String> {
+            Ok(client.get(url).send().await?.text().await?)
+        }
 
-fn main() {}
+        let mut retry = 3;
+        let page = loop {
+            if retry == 0 {
+                error!("Failed to get {url} after 3 tries");
+                return Err(eyre!("Failed to get {url}"));
+            }
+
+            match get_page(&self.client, &url).await {
+                Ok(page) => break page,
+                Err(e) => {
+                    debug!("Failed to get page: {e}");
+
+                    let factor = {
+                        let dist = Uniform::new(10.0, 30.0);
+                        let mut rng = rand::thread_rng();
+                        dist.sample(&mut rng)
+                    };
+
+                    let wait_duration = Duration::from_millis((1000. * factor) as u64);
+
+                    warn!("{url} Connection failed, waiting for {wait_duration:?}");
+                    sleep(wait_duration).await;
+                    retry -= 1;
+                }
+            }
+        };
+
+        Ok(Html::parse_document(&page))
+    }
+
+    #[instrument(skip(self))]
+    async fn scrape(&self, id: parser::Id) -> color_eyre::Result<()> {
+        //
+        // first see if the mathematician already exists
+        if has_mathematician(&*self.db_pool, id).await? {
+            return Ok(());
+        }
+        info!("Started scraping");
+
+        // scrape the page
+        let url = format!("https://www.mathgenealogy.org/id.php?id={}", id.0);
+
+        let advisor = {
+            let page = self.get_page(&url).await.inspect_err(|e| {
+                error!("Failed to get page: {e}");
+            })?;
+            let mut advisor = parser::scrape(&page).inspect_err(|e| {
+                error!("Failed to scrape page: {e}");
+            })?;
+
+            advisor
+        };
+        info!("Main mathematician scraped");
+        insert_mathematician(&*self.db_pool, id, &advisor.name).await?;
+
+        let mut advisees = vec![];
+        // visit all the students
+        for student in &advisor.students {
+            let Some(student_id) = student.id else {
+                continue;
+            };
+
+            if has_mathematician(&*self.db_pool, student_id).await?
+                && has_advisor_advisee(&*self.db_pool, id, student_id).await?
+            {
+                // if they're already in the database, skip
+                continue;
+            }
+
+            let url = format!("https://www.mathgenealogy.org/id.php?id={}", student_id.0);
+            let student_page = self.get_page(&url).await?;
+            let mut student = parser::scrape(&student_page)?;
+            info!("Student scraped {student:?}");
+
+            // we only explore one layer deep
+            advisees.push(student);
+        }
+
+        info!("Started transaction");
+        let transaction = self.db_pool.begin().await?;
+        insert_record(transaction, (id, &advisor)).await?;
+        info!("Transaction committed");
+
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+    // init tracing with fmt substribers
+    tracing_subscriber::fmt::init();
+
+    color_eyre::install()?;
+
+    let postgres_url = std::env::var(&"POSTGRES_URL").expect("POSTGRES_URL is not set");
+
+    let db_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(12)
+        .connect(&postgres_url)
+        .await?;
+    let pool = Arc::new(db_pool);
+
+    let client = reqwest::Client::new();
+
+    let scraper = Scraper {
+        db_pool: Arc::clone(&pool),
+        client,
+    };
+    let scraper = Arc::new(scraper);
+
+    let mut tasks = vec![];
+    // let mut rng = thread_rng();
+    // let dist = Uniform::new(0, 307384);
+
+    for id in 1..=307433 {
+        // let id = dist.sample(&mut rng);
+        let id = parser::Id(id);
+        let scraper = Arc::clone(&scraper);
+
+        if !has_mathematician(&*scraper.db_pool, id).await? {
+            let task = tokio::spawn(async move { scraper.scrape(id).await });
+
+            // sleep for 1 second
+            let sleep_duration = Duration::from_millis(700);
+            sleep(sleep_duration).await;
+            tasks.push(task);
+        }
+    }
+
+    for task in tasks {
+        let _ = task.await;
+    }
+
+    Ok(())
+}
