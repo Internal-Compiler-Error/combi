@@ -27,14 +27,21 @@ lazy_static! {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
 pub struct ScrapeRecord {
+    /// The main mathematician on the page
     pub mathematician: Mathematician,
+
+    /// A list of students mentored under the main mathematician
     pub students_ids: Vec<i32>,
+
+    /// The dissertation of the main mathematician
     pub dissertation: Option<Dissertation>,
+
+    ///
     pub graduation_record: Option<GraduationRecord>,
 }
 
-pub fn scrape(page: &Html) -> color_eyre::Result<ScrapeRecord> {
-    let mathematician = scrape_mathematician(page)?;
+pub fn scrape(page: &Html, id: i32) -> color_eyre::Result<ScrapeRecord> {
+    let mathematician = scrape_mathematician(page, id)?;
     let dissertation_title = scrape_dissertation(page);
     let student_ids = scrape_students(page)?;
 
@@ -152,7 +159,7 @@ fn parse_name(name: &str) -> String {
 }
 
 #[instrument]
-pub fn scrape_mathematician(page: &Html) -> color_eyre::Result<Mathematician> {
+pub fn scrape_mathematician(page: &Html, id: i32) -> color_eyre::Result<Mathematician> {
     let full_name = page
         .select(&NAME)
         .next()
@@ -178,11 +185,12 @@ pub fn scrape_mathematician(page: &Html) -> color_eyre::Result<Mathematician> {
     // }
 
     // let year = parse_year(page);
-    Ok(Mathematician {
-        id: 0,
+    let var_name = Mathematician {
+        id,
         name: full_name,
         // year,
-    })
+    };
+    Ok(var_name)
 }
 
 fn parse_country(page: &Html) -> Option<&str> {
@@ -194,14 +202,7 @@ fn parse_country(page: &Html) -> Option<&str> {
 fn parse_school(page: &Html) -> Option<(School, Option<Country>)> {
     // the university is next to the the span that contains 'Ph.D. ' (yes they have a stupid space
     // in there)
-    let name = page
-        .select(&DIV_SPAN)
-        .next()?
-        .text()
-        .skip_while(|node| node.trim() != "Ph.D.")
-        .skip(1)
-        .next()?
-        .trim();
+    let name = page.select(&DIV_SPAN).next()?.text().skip(1).next()?.trim();
 
     let country = parse_country(page).map(|c| Country {
         name: c.to_string(),
