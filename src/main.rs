@@ -190,35 +190,25 @@ where
 #[instrument(skip(executor))]
 // TODO: figure out what the fuck am I suppose to do make executor a generic
 async fn insert_grad_record<E>(
-    executor: &mut PgConnection,
+    executor: &mut E,
     grad_record: &GraduationRecord,
-) -> color_eyre::Result<()> {
-    insert_school(&mut *executor, &grad_record.school).await?;
+) -> color_eyre::Result<()>
+where
+    for<'a> &'a mut E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    insert_school::<&mut E>(executor, &grad_record.school).await?;
     let _ = sqlx::query!(
         "INSERT INTO graduation_records(mathematician, school, year) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING;",
         &grad_record.mathematician.0,
         grad_record.school.name,
         grad_record.year as i32)
-        .execute(&mut *executor)
+        .execute(executor)
         .await
         .inspect_err(|e| {
             error!("Failed to insert graduation record {e}");
         })?;
 
     Ok(())
-}
-
-async fn has_mathematician<'a, E>(executor: E, id: parser::Id) -> color_eyre::Result<bool>
-where
-    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
-{
-    let query = sqlx::query!(
-        r"SELECT COUNT(1) FROM mathematicians WHERE id = $1 LIMIT 1;",
-        id.0
-    );
-    let result = query.fetch_one(executor).await?;
-
-    Ok(result.count == Some(1))
 }
 
 #[instrument(level = "debug", skip(executor))]
@@ -270,21 +260,24 @@ where
 }
 
 #[instrument(skip(transaction))]
-async fn insert_record<'a>(
-    mut transaction: Transaction<'a, Postgres>,
+async fn insert_record<E>(
+    transaction: &mut E,
     record: (parser::Id, &parser::ScrapeRecord),
-) -> color_eyre::Result<()> {
+) -> color_eyre::Result<()>
+where
+    for<'a> &'a mut E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     let advisor_id = record.0;
     let advisor = record.1;
 
-    insert_mathematician(&mut *transaction, advisor_id, &advisor.name).await?;
+    insert_mathematician::<&mut E>(transaction, advisor_id, &advisor.name).await?;
     debug!("mathematician inserted");
 
     if let Some(country) = &advisor.country {
         let country = Country {
             name: country.clone(),
         };
-        insert_country(&mut *transaction, &country).await?;
+        insert_country::<&mut E>(transaction, &country).await?;
         debug!("country inserted");
     }
 
@@ -297,7 +290,7 @@ async fn insert_record<'a>(
             },
         };
 
-        insert_dissertation(&mut *transaction, &dissertation).await?;
+        insert_dissertation::<&mut E>(transaction, &dissertation).await?;
         debug!("disseration inserted");
     }
 
@@ -305,7 +298,7 @@ async fn insert_record<'a>(
         let school = School {
             name: school.clone(),
         };
-        insert_school(&mut *transaction, &school).await?;
+        insert_school::<&mut E>(transaction, &school).await?;
         debug!("school inserted");
 
         // TODO: yikes, duplicate inserts
@@ -313,7 +306,7 @@ async fn insert_record<'a>(
             let country = Country {
                 name: country.clone(),
             };
-            insert_school_location(&mut *transaction, &school, &country).await?;
+            insert_school_location::<&mut E>(transaction, &school, &country).await?;
             debug!("school location inserted");
         }
     }
@@ -327,20 +320,20 @@ async fn insert_record<'a>(
                 },
                 year: year as i32,
             };
-            insert_grad_record::<PgConnection>(&mut *transaction, &graduation_record).await?;
+            insert_grad_record(transaction, &graduation_record).await?;
             debug!("grad record inserted");
         }
     }
 
     for student in &advisor.students {
         if let Some(student_id) = student.id {
-            insert_mathematician(&mut *transaction, student_id, &student.name).await?;
-            insert_adivsor_relation(&mut *transaction, advisor_id, student_id).await?;
+            insert_mathematician::<&mut E>(transaction, student_id, &student.name).await?;
+            insert_adivsor_relation::<&mut E>(transaction, advisor_id, student_id).await?;
             debug!("adivsor avisee record inserted");
         }
     }
 
-    transaction.commit().await?;
+    // transaction.commit().await?;
     Ok(())
 }
 
@@ -445,8 +438,9 @@ impl Scraper {
         }
 
         info!("Started transaction");
-        let transaction = self.db_pool.begin().await?;
-        insert_record(transaction, (id, &advisor)).await?;
+        let mut transaction = self.db_pool.begin().await?;
+        let executor = &mut *transaction;
+        insert_record(executor, (id, &advisor)).await?;
         info!("Transaction committed");
 
         Ok(())
