@@ -30,9 +30,15 @@ impl Display for Id {
     }
 }
 
-impl Into<i32> for Id {
-    fn into(self) -> i32 {
-        self.0
+impl From<i32> for Id {
+    fn from(value: i32) -> Self {
+        Id(value)
+    }
+}
+
+impl From<&i32> for Id {
+    fn from(value: &i32) -> Self {
+        Id(*value)
     }
 }
 
@@ -118,7 +124,7 @@ pub fn scrape_students(page: &Html) -> color_eyre::Result<Vec<Student>> {
         }
         Some(x) => x,
     };
-    let mut students = entries.select(&ROWS_SELECTOR).skip(1); // first row is the header
+    let students = entries.select(&ROWS_SELECTOR).skip(1); // first row is the header
 
     let students: Vec<_> = students
         .filter_map(|row| {
