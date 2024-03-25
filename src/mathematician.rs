@@ -32,7 +32,19 @@ pub struct Country {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
 pub struct GraduationRecord {
-    pub mathematician: Mathematician,
+    pub mathematician: Id,
     pub school: School,
     pub year: i32,
+}
+
+trait MathematicainRepo {
+    fn find_by_id(&self, id: Id) -> Option<Mathematician>;
+}
+
+trait SchoolRepo {
+    fn find_by_name(&self, name: &str) -> Option<School>;
+}
+
+trait CountryRepo {
+    fn find_by_name(&self, name: &str) -> Option<Country>;
 }

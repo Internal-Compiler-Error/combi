@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use color_eyre::eyre::eyre;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -21,6 +23,12 @@ lazy_static! {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow, Copy, sqlx::Type)]
 pub struct Id(pub i32);
+
+impl Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl Into<i32> for Id {
     fn into(self) -> i32 {
@@ -185,7 +193,7 @@ fn parse_country(page: &Html) -> Option<&str> {
 }
 
 fn parse_title(page: &Html) -> Option<&str> {
-    page.select(&DIV_SPAN).next()?.text().next()
+    Some(page.select(&DIV_SPAN).next()?.text().next()?.trim())
 }
 
 fn parse_school(page: &Html) -> Option<&str> {

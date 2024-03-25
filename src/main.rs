@@ -3,7 +3,9 @@
 mod mathematician;
 mod parser;
 
+use clap::Parser;
 use color_eyre::eyre::eyre;
+use lazy_static::lazy_static;
 use mathematician::Country;
 use mathematician::Dissertation;
 use mathematician::GraduationRecord;
@@ -13,18 +15,29 @@ use rand_distr::Distribution;
 use rand_distr::Uniform;
 use reqwest::Client;
 use scraper::Html;
+use scraper::Selector;
 use sqlx::PgConnection;
 use sqlx::Postgres;
 use sqlx::Transaction;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::instrument;
 use tracing::warn;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+#[derive(Debug, Eq, PartialEq, Parser)]
+struct Args {
+    /// the number of concurrent requests to make
+    #[clap(short, long, default_value = "256")]
+    concurrency: usize,
+}
 
 #[instrument(skip(executor))]
 async fn insert_school<'a, E>(executor: E, school: &School) -> color_eyre::Result<()>
@@ -183,7 +196,7 @@ async fn insert_grad_record<E>(
     insert_school(&mut *executor, &grad_record.school).await?;
     let _ = sqlx::query!(
         "INSERT INTO graduation_records(mathematician, school, year) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING;",
-        &grad_record.mathematician.id.0,
+        &grad_record.mathematician.0,
         grad_record.school.name,
         grad_record.year as i32)
         .execute(&mut *executor)
@@ -227,6 +240,33 @@ where
     })?;
 
     Ok(result.count == Some(1))
+}
+
+#[instrument(level = "debug", skip(executor))]
+async fn is_likely_bogus<'a, E>(executor: E, id: parser::Id) -> color_eyre::Result<bool>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let count = sqlx::query!(
+        r"SELECT COUNT(1) FROM likely_bogus WHERE id = $1 LIMIT 1;",
+        id.0
+    )
+    .fetch_one(executor)
+    .await?;
+
+    Ok(count.count == Some(1))
+}
+
+#[instrument(level = "debug", skip(executor))]
+async fn insert_likely_bogus<'a, E>(executor: E, id: parser::Id) -> color_eyre::Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    sqlx::query!(r"INSERT INTO likely_bogus(id) VALUES($1);", id.0)
+        .execute(executor)
+        .await?;
+
+    Ok(())
 }
 
 #[instrument(skip(transaction))]
@@ -278,15 +318,10 @@ async fn insert_record<'a>(
         }
     }
 
-    let mathematician = Mathematician {
-        id: advisor_id,
-        name: advisor.name.clone(),
-    };
-
     if let Some(school) = &advisor.school {
         if let Some(year) = advisor.year {
             let graduation_record = GraduationRecord {
-                mathematician,
+                mathematician: advisor_id,
                 school: School {
                     name: school.clone(),
                 },
@@ -313,24 +348,37 @@ async fn insert_record<'a>(
 struct Scraper {
     db_pool: Arc<sqlx::Pool<sqlx::Postgres>>,
     client: Client,
+
+    /// used to limit the number of in-flight HTTP requests
+    semaphore: Semaphore,
+}
+
+lazy_static! {
+    static ref PARAGRAPH_SELECTOR: Selector = Selector::parse("p").unwrap();
 }
 
 impl Scraper {
+    /// The stupid page returns a 200 even if the ID is not found
+    fn id_not_found_err(page: &Html) -> bool {
+        page.select(&PARAGRAPH_SELECTOR)
+            .any(|e| e.text().any(|t| t.trim() == "You have specified an ID that does not exist in the database. Please back up and try again."))
+    }
+
     #[instrument(skip(self))]
-    async fn get_page(&self, url: &str) -> color_eyre::Result<Html> {
+    async fn get_page(&self, url: &str) -> color_eyre::Result<String> {
         async fn get_page(client: &Client, url: &str) -> color_eyre::Result<String> {
             Ok(client.get(url).send().await?.text().await?)
         }
 
         let mut retry = 3;
-        let page = loop {
+        loop {
             if retry == 0 {
                 error!("Failed to get {url} after 3 tries");
                 return Err(eyre!("Failed to get {url}"));
             }
 
             match get_page(&self.client, &url).await {
-                Ok(page) => break page,
+                Ok(page) => break Ok(page),
                 Err(e) => {
                     debug!("Failed to get page: {e}");
 
@@ -347,34 +395,32 @@ impl Scraper {
                     retry -= 1;
                 }
             }
-        };
+        }
+    }
 
-        Ok(Html::parse_document(&page))
+    async fn get_record(&self, id: parser::Id) -> color_eyre::Result<parser::ScrapeRecord> {
+        let url = format!("https://www.mathgenealogy.org/id.php?id={}", id.0);
+        let page = self.get_page(&url).await?;
+        let page = Html::parse_document(&page);
+        if Self::id_not_found_err(&page) {
+            return Err(eyre!("{id} is not a valid ID in their database"));
+        }
+        let record = parser::scrape(&page)?;
+        Ok(record)
     }
 
     #[instrument(skip(self))]
     async fn scrape(&self, id: parser::Id) -> color_eyre::Result<()> {
-        //
         // first see if the mathematician already exists
-        if has_mathematician(&*self.db_pool, id).await? {
-            return Ok(());
-        }
-        info!("Started scraping");
+        // if has_mathematician(&*self.db_pool, id).await? {
+        //     return Ok(());
+        // }
 
-        // scrape the page
-        let url = format!("https://www.mathgenealogy.org/id.php?id={}", id.0);
+        let _permit = self.semaphore.acquire().await?;
+        info!("Working on {id}");
 
-        let advisor = {
-            let page = self.get_page(&url).await.inspect_err(|e| {
-                error!("Failed to get page: {e}");
-            })?;
-            let mut advisor = parser::scrape(&page).inspect_err(|e| {
-                error!("Failed to scrape page: {e}");
-            })?;
-
-            advisor
-        };
-        info!("Main mathematician scraped");
+        let advisor = self.get_record(id).await?;
+        info!("Main mathematician scraped {id}");
         insert_mathematician(&*self.db_pool, id, &advisor.name).await?;
 
         let mut advisees = vec![];
@@ -384,16 +430,14 @@ impl Scraper {
                 continue;
             };
 
-            if has_mathematician(&*self.db_pool, student_id).await?
-                && has_advisor_advisee(&*self.db_pool, id, student_id).await?
-            {
-                // if they're already in the database, skip
-                continue;
-            }
+            // if has_mathematician(&*self.db_pool, student_id).await?
+            //     && has_advisor_advisee(&*self.db_pool, id, student_id).await?
+            // {
+            //     // if they're already in the database, skip
+            //     continue;
+            // }
 
-            let url = format!("https://www.mathgenealogy.org/id.php?id={}", student_id.0);
-            let student_page = self.get_page(&url).await?;
-            let mut student = parser::scrape(&student_page)?;
+            let student = self.get_record(student_id).await?;
             info!("Student scraped {student:?}");
 
             // we only explore one layer deep
@@ -411,8 +455,19 @@ impl Scraper {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    // init tracing with fmt substribers
-    tracing_subscriber::fmt::init();
+    let args = Args::parse();
+
+    // let console_layer = console_subscriber::spawn();
+    //
+    // // `tracing_subscriber::Registry`:
+    // tracing_subscriber::registry()
+    //     .with(console_layer)
+    //     .with(tracing_subscriber::fmt::layer())
+    //     .init();
+
+    tracing_subscriber::fmt::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
 
     color_eyre::install()?;
 
@@ -429,6 +484,7 @@ async fn main() -> color_eyre::Result<()> {
     let scraper = Scraper {
         db_pool: Arc::clone(&pool),
         client,
+        semaphore: Semaphore::new(args.concurrency),
     };
     let scraper = Arc::new(scraper);
 
@@ -436,19 +492,19 @@ async fn main() -> color_eyre::Result<()> {
     // let mut rng = thread_rng();
     // let dist = Uniform::new(0, 307384);
 
-    for id in 1..=307433 {
+    for id in 58200..=350000 {
         // let id = dist.sample(&mut rng);
         let id = parser::Id(id);
         let scraper = Arc::clone(&scraper);
 
-        if !has_mathematician(&*scraper.db_pool, id).await? {
-            let task = tokio::spawn(async move { scraper.scrape(id).await });
+        // if !has_mathematician(&*scraper.db_pool, id).await? {
+        let task = tokio::spawn(async move { scraper.scrape(id).await });
 
-            // sleep for 1 second
-            let sleep_duration = Duration::from_millis(700);
-            sleep(sleep_duration).await;
-            tasks.push(task);
-        }
+        // sleep for 1 second
+        // let sleep_duration = Duration::from_millis(700);
+        // sleep(sleep_duration).await;
+        tasks.push(task);
+        // }
     }
 
     for task in tasks {
