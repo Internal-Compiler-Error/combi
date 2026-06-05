@@ -47,7 +47,7 @@ pub struct AdvisorRelation {
 pub trait MathematicianRepo {
     async fn mathematician_by_id(&self, id: Id) -> color_eyre::Result<Option<Mathematician>>;
 
-    async fn update_mathematician(&self, mathematician: &Mathematician) -> color_eyre::Result<()>;
+    async fn upsert_mathematician(&self, mathematician: &Mathematician) -> color_eyre::Result<()>;
 }
 
 impl MathematicianRepo for sqlx::PgPool {
@@ -62,11 +62,10 @@ impl MathematicianRepo for sqlx::PgPool {
         .map_err(Into::into)
     }
 
-    async fn update_mathematician(&self, mathematician: &Mathematician) -> color_eyre::Result<()> {
+    async fn upsert_mathematician(&self, mathematician: &Mathematician) -> color_eyre::Result<()> {
         sqlx::query!(
-            "INSERT INTO mathematicians (id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            "INSERT INTO mathematicians (id, name) VALUES ($1, $2) ON CONFLICT(id) DO UPDATE SET name = EXCLUDED.name",
             &mathematician.id.0,
-            // &mathematician.name.map(|s| s.as_str()),
             mathematician.name,
         )
         .execute(self)
@@ -208,7 +207,7 @@ impl SchoolLocationRepo for sqlx::PgPool {
 pub trait DissertationRepo {
     async fn dissertation_by_author(&self, author: Id) -> color_eyre::Result<Option<Dissertation>>;
 
-    async fn update_dissertation(&self, dissertation: &Dissertation) -> color_eyre::Result<()>;
+    async fn upsert_dissertation(&self, dissertation: &Dissertation) -> color_eyre::Result<()>;
 }
 
 impl DissertationRepo for sqlx::PgPool {
@@ -223,8 +222,9 @@ impl DissertationRepo for sqlx::PgPool {
         .map_err(Into::into)
     }
 
-    async fn update_dissertation(&self, dissertation: &Dissertation) -> color_eyre::Result<()> {
+    async fn upsert_dissertation(&self, dissertation: &Dissertation) -> color_eyre::Result<()> {
         sqlx::query!(
+            // "INSERT INTO dissertations (author, title) VALUES ($1, $2) ON CONFLICT(author) DO UPDATE SET title = EXCLUDED.title",
             "INSERT INTO dissertations (author, title) VALUES ($1, $2) ON CONFLICT DO NOTHING",
             &dissertation.author.0,
             &dissertation.title
@@ -241,7 +241,7 @@ pub trait GraduationRecordRepo {
         &self,
         mathematician: Id,
     ) -> color_eyre::Result<Option<GraduationRecord>>;
-    async fn update_graduation_record(&self, record: &GraduationRecord) -> color_eyre::Result<()>;
+    async fn upsert_graduation_record(&self, record: &GraduationRecord) -> color_eyre::Result<()>;
 }
 
 impl GraduationRecordRepo for sqlx::PgPool {
@@ -256,7 +256,8 @@ impl GraduationRecordRepo for sqlx::PgPool {
         );
         map.fetch_optional(self).await.map_err(Into::into)
     }
-    async fn update_graduation_record(&self, record: &GraduationRecord) -> color_eyre::Result<()> {
+    async fn upsert_graduation_record(&self, record: &GraduationRecord) -> color_eyre::Result<()> {
+        // TODO: actually upsert instead of 'do nothing'
         sqlx::query!("INSERT INTO graduation_records (mathematician, school, year) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", &record.mathematician.0, &record.school, &record.year)
             .execute(self)
             .await?;

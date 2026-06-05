@@ -20,6 +20,7 @@ use scraper::Selector;
 use sqlx::{FromRow, PgPool};
 
 use std::fmt::Debug;
+use std::ops::Sub;
 use std::sync::Arc;
 use std::time::Duration;
 use sqlx::types::chrono;
@@ -29,6 +30,7 @@ use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::instrument;
+use tracing::log::log;
 use tracing::warn;
 
 use crate::mathematician::AdvisorRelation;
@@ -39,7 +41,7 @@ use crate::mathematician::GraduationRecordRepo;
 use crate::mathematician::MathematicianRepo;
 use crate::mathematician::SchoolLocationRepo;
 use crate::mathematician::SchoolRepo;
-use crate::parser::{Id, ScrapeRecord};
+use crate::parser::{Id, MGPage};
 
 #[derive(Debug, Eq, PartialEq, Parser)]
 struct Args {
@@ -53,7 +55,7 @@ struct Args {
 
 #[derive(Debug, FromRow, Eq, PartialEq, Clone)]
 struct LastScraped{
-    id: Id,
+    id: i64,
     date: chrono::DateTime<chrono::Local>,
     page_scraped: Id,
     result: String,
@@ -62,27 +64,26 @@ struct LastScraped{
 #[instrument(skip(pool))]
 async fn insert_record(
     pool: &PgPool,
-    record: (parser::Id, ScrapeRecord),
+    record: MGPage,
 ) -> color_eyre::Result<()> {
-    let advisor_id = record.0;
-    let advisor = record.1;
+    let advisor = record;
 
     let mathematician = Mathematician {
-        id: advisor_id,
+        id: advisor.id,
         name: Some(advisor.name),
     };
 
-    pool.update_mathematician(&mathematician).await.unwrap();
+    pool.upsert_mathematician(&mathematician).await?;
     debug!("mathematician inserted");
 
     if let Some(dissertation) = advisor.dissertation {
         let dissertation = Dissertation {
             title: dissertation,
-            author: advisor_id,
+            author: advisor.id,
         };
 
-        pool.update_dissertation(&dissertation).await.unwrap();
-        debug!("disseration inserted");
+        pool.upsert_dissertation(&dissertation).await?;
+        debug!("dissertation inserted");
     }
 
     let country = advisor.country.map(|name| Country { name });
@@ -91,7 +92,7 @@ async fn insert_record(
 
     let grad_record = if country.is_some() && school.is_some() && year.is_some() {
         Some(GraduationRecord {
-            mathematician: advisor_id,
+            mathematician: advisor.id,
             school: school.clone().unwrap().name,
             year: year.unwrap() as i32,
         })
@@ -109,54 +110,70 @@ async fn insert_record(
     };
 
     if let Some(country) = &country {
-        pool.update_country(&country).await.unwrap();
+        pool.update_country(&country).await?;
         debug!("country inserted");
     }
 
     if let Some(school) = &school {
-        pool.update_school(&school).await.unwrap();
+        pool.update_school(&school).await?;
         debug!("school inserted");
     }
 
     if let Some(school_location) = &school_location {
-        pool.update_location(&school_location).await.unwrap();
+        pool.update_location(&school_location).await?;
         debug!("school location inserted");
     }
 
     if let Some(grad_record) = &grad_record {
-        pool.update_graduation_record(&grad_record).await.unwrap();
+        pool.upsert_graduation_record(&grad_record).await?;
         debug!("graduation record inserted");
     }
 
-    for student in &advisor.students {
-        if let Some(student_id) = student.id {
-            let mathematician = Mathematician {
-                id: student_id,
-                name: Some(student.name.clone()),
-            };
-
-            let relation = AdvisorRelation {
-                advisor: advisor_id,
-                advisee: student_id,
-            };
-
-            pool.update_mathematician(&mathematician).await.unwrap();
-            pool.update_advisor_relation(&relation).await.unwrap();
-            debug!("adivsor avisee record inserted");
-        }
-    }
 
     let _ = sqlx::query!(
         "INSERT INTO scrape_logs(date, page_scraped, result) VALUES(NOW(), $1, 'success')",
-        advisor_id.0
+        advisor.id.0
     )
     .execute(pool)
     .await
-    .inspect_err(|e| error!("Failed to insert {} to scrape log: {}))", advisor_id.0, e));
+    .inspect_err(|e| error!("Failed to insert {} to scrape log: {}))", advisor.id.0, e));
 
     Ok(())
 }
 
+#[instrument(skip(pool))]
+async fn insert_relations(
+    pool: &PgPool,
+    advisor: MGPage,
+    descendants: Vec<MGPage>) -> color_eyre::Result<()> {
+    for descendant in &descendants {
+        let relation = AdvisorRelation {
+            advisor: advisor.id,
+            advisee: descendant.id,
+        };
+
+        pool.update_advisor_relation(&relation).await?;
+        debug!("{}->{}: {}->{} inserted", advisor.id, descendant.id, advisor.name, descendant.name);
+    }
+
+    Ok(())
+}
+
+#[instrument(skip(pool))]
+async fn insert_layer(
+    pool: &PgPool,
+    advisor: MGPage,
+    descendants: Vec<MGPage>) -> color_eyre::Result<()> {
+    // TODO: wrap the following into a transaction
+
+    insert_record(pool, advisor.clone()).await?;
+    for descendant in &descendants {
+        insert_record(pool, descendant.clone()).await?;
+    }
+
+    insert_relations(pool, advisor, descendants).await?;
+    Ok(())
+}
 #[derive(Debug)]
 struct Scraper {
     db_pool: Arc<sqlx::Pool<sqlx::Postgres>>,
@@ -164,7 +181,7 @@ struct Scraper {
 
     /// used to limit the number of in-flight HTTP requests
     semaphore: Semaphore,
-    // TODO: implement an error tolerance and stop after a certrain threshold
+    // TODO: implement an error tolerance and stop after a certain threshold
 }
 
 lazy_static! {
@@ -178,12 +195,14 @@ impl Scraper {
             .any(|e| e.text().any(|t| t.trim() == "You have specified an ID that does not exist in the database. Please back up and try again."))
     }
 
+
     #[instrument(skip(self))]
-    async fn get_page(&self, url: &str) -> color_eyre::Result<String> {
-        async fn get_page(client: &Client, url: &str) -> color_eyre::Result<String> {
+    async fn download_page(&self, url: &str) -> color_eyre::Result<String> {
+        async fn download_page(client: &Client, url: &str) -> color_eyre::Result<String> {
             Ok(client.get(url).send().await?.text().await?)
         }
 
+        let _permit = self.semaphore.acquire().await?;
         let mut retry = 3;
         loop {
             if retry == 0 {
@@ -191,7 +210,7 @@ impl Scraper {
                 return Err(eyre!("Failed to get {url}"));
             }
 
-            match get_page(&self.client, &url).await {
+            match download_page(&self.client, &url).await {
                 Ok(page) => break Ok(page),
                 Err(e) => {
                     debug!("Failed to get page: {e}");
@@ -212,8 +231,8 @@ impl Scraper {
         }
     }
 
-    async fn get_record(&self, id: parser::Id) -> color_eyre::Result<ScrapeRecord> {
-        async fn insert_to_bogus(id: parser::Id, pool: Arc<sqlx::Pool<sqlx::Postgres>>) {
+    async fn get_record(&self, id: Id) -> color_eyre::Result<MGPage> {
+        async fn insert_to_bogus(id: Id, pool: Arc<sqlx::Pool<sqlx::Postgres>>) {
             let _ = sqlx::query!("INSERT INTO scrape_logs(date, page_scraped, result) VALUES(NOW(), $1, 'failed')", id.0)
                 .execute(&*pool)
                 .await
@@ -221,7 +240,7 @@ impl Scraper {
         }
 
         let url = format!("https://www.mathgenealogy.org/id.php?id={}", id.0);
-        let page = self.get_page(&url).await?;
+        let page = self.download_page(&url).await?;
         let page = Html::parse_document(&page);
 
         if Self::id_not_found_err(&page) {
@@ -234,45 +253,69 @@ impl Scraper {
 
             return Err(eyre!("{id} is not a valid ID in their database"));
         }
-        let record = parser::scrape(&page)?;
+        let record = parser::scrape(id, &page)?;
         Ok(record)
     }
     /// A layer is defined as one node and all the nodes connected to it, i.e. one layer of a tree
-    async fn get_single_layer(&self, root: parser::Id) -> color_eyre::Result<(ScrapeRecord, Vec<ScrapeRecord>)> {
-        let root_record = self.get_record(root).await?;
+    async fn get_single_layer(&self, root: Id) -> color_eyre::Result<(MGPage, Vec<MGPage>)> {
+        let root_page = self.scrape_single(root).await?;
+
+        if root_page.is_none() {
+            info!("{root} doesn't have a page or was scraped in the last 24 hours");
+            return Err(eyre!("{root} doesn't have a page"));
+        }
+        let root_page = root_page.unwrap();
+
         let mut descendants = vec![];
-        for descendant in &root_record.students {
+        for descendant in &root_page.students {
             if let Some(descendant_id) = descendant.id {
-                descendants.push(self.get_record(descendant_id).await?);
+                let descendant_page = self.scrape_single(descendant_id).await;
+                match descendant_page {
+                    Err(err) => {
+                        info!("{descendant_id}: {err}");
+                        continue
+                    },
+                    Ok(None) => {
+                        info!("{descendant_id}: doesn't have a page");
+                    },
+                    Ok(Some(descendant)) => {
+                        descendants.push(descendant);
+                    }
+                }
             }
         }
-        Ok((root_record, descendants))
+        Ok((root_page, descendants))
     }
+
     #[instrument(skip(self))]
-    async fn scrape(&self, id: parser::Id) -> color_eyre::Result<()> {
+    async fn scrape_single_layer(&self, root: Id) -> color_eyre::Result<()> {
+        let (advisor, descendants) = self.get_single_layer(root).await?;
+        insert_layer(&self.db_pool, advisor, descendants).await?;
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn scrape_single(&self, id: Id) -> color_eyre::Result<Option<MGPage>> {
         // TODO: implement a logic where if the record has been updated recently, then skip it
         // unless we are in a forced mode
         // TODO: implement a force mode to skip this check
         let now = chrono::Local::now();
-        // let likely_bogus = sqlx::query_file_as!(LastScraped, "queries/latest_page_scrape_record.sql", id.0)
-        //     .fetch_optional(&*self.db_pool)
-        //     .await?
-        //     .is_some();
-        let likely_bogus = false;
+        let last_scraped = sqlx::query_file_as!(LastScraped, "queries/latest_page_scrape_record.sql", id.0 as i64)
+            .fetch_optional(&*self.db_pool)
+            .await?;
 
 
-        if likely_bogus {
-            return Ok(());
+        if let Some(last_scraped) = last_scraped
+            && now.signed_duration_since(last_scraped.date).abs().to_std()? < Duration::from_hours(24)
+        {
+            return Ok(None);
         }
 
-        let _permit = self.semaphore.acquire().await?;
         info!("Working on {id}");
 
         let advisor = self.get_record(id).await?;
-
-        info!("Main mathematician scraped {id}");
-
-        insert_record(&*self.db_pool, (id, advisor)).await
+        info!("Page {id} scrapped");
+        Ok(Some(advisor))
     }
 }
 
@@ -294,22 +337,25 @@ async fn main() -> color_eyre::Result<()> {
         .await?;
     let pool = Arc::new(db_pool);
 
-    let client = reqwest::Client::new();
+    let http_cli = reqwest::Client::new();
 
     let scraper = Scraper {
         db_pool: Arc::clone(&pool),
-        client,
-        semaphore: Semaphore::new(args.concurrency),
+        client: http_cli,
+        // semaphore: Semaphore::new(args.concurrency),
+        semaphore: Semaphore::new(1),
     };
     let scraper = Arc::new(scraper);
 
     let mut tasks = vec![];
 
-    for id in 58200..=350000 {
+    for id in 300..=600 {
         let id = parser::Id(id);
         let scraper = Arc::clone(&scraper);
 
-        let task = tokio::spawn(async move { scraper.scrape(id).await });
+        let task = tokio::spawn(async move {
+            scraper.scrape_single_layer(id).await.inspect_err(|e| println!("{e}"));
+        });
 
         tasks.push(task);
     }

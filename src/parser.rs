@@ -44,11 +44,13 @@ impl From<&i32> for Id {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
 /// A record of a mathematician and their students
-pub struct ScrapeRecord {
+pub struct MGPage {
+    pub id: Id, 
+    
     /// The name of the main mathematician
     pub name: String,
 
-    /// A list of studetns mentored under the main mathematician
+    /// A list of students mentored under the main mathematician
     pub students: Vec<Student>,
 
     /// The title of dissertation of the main mathematician
@@ -83,7 +85,7 @@ pub struct Student {
     pub year: Option<i16>,
 }
 
-pub fn scrape(page: &Html) -> color_eyre::Result<ScrapeRecord> {
+pub fn scrape(id: Id, page: &Html) -> color_eyre::Result<MGPage> {
     let mathematician = scrape_mathematician(page)?;
     let dissertation = scrape_dissertation(page);
     let students = scrape_students(page)?;
@@ -93,7 +95,8 @@ pub fn scrape(page: &Html) -> color_eyre::Result<ScrapeRecord> {
     let country = parse_country(page);
     let degree = parse_title(page);
 
-    Ok(ScrapeRecord {
+    Ok(MGPage {
+        id,
         name: mathematician,
         students,
         dissertation: dissertation.map(|d| d.to_string()),
@@ -220,6 +223,7 @@ fn parse_year(page: &Html) -> Option<i16> {
 mod test {
     use super::*;
     use std::fs::read;
+    const DUMMY_ID: Id = Id(-1);
 
     #[test]
     fn parse_name_works_for_tai() {
@@ -274,7 +278,7 @@ mod test {
         let page = read("rajesh.html").unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
-        let rajesh = scrape(&page).unwrap();
+        let rajesh = scrape(DUMMY_ID, &page).unwrap();
 
         assert_eq!(rajesh.name, "Rajesh Pereira");
         assert_eq!(rajesh.school, Some("University of Toronto".to_string()));
@@ -290,7 +294,7 @@ mod test {
         let page = read("abu.html").unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
-        let abu = scrape(&page).unwrap();
+        let abu = scrape(DUMMY_ID, &page).unwrap();
 
         assert_eq!(abu.name, "Abu Sahl 'Isa ibn Yahya al-Masihi");
         assert_eq!(abu.dissertation, None);
@@ -341,7 +345,7 @@ mod test {
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
 
-        let knuth = scrape(&page).unwrap();
+        let knuth = scrape(DUMMY_ID, &page).unwrap();
 
         assert_eq!(knuth.name, "Donald Ervin Knuth");
         assert_eq!(
