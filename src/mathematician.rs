@@ -11,7 +11,7 @@ pub struct Dissertation {
 #[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
 pub struct Mathematician {
     pub id: Id,
-    pub name: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
@@ -30,6 +30,7 @@ pub struct Country {
     pub name: String,
 }
 
+// This type has issues, see the init sql file for more
 #[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
 pub struct GraduationRecord {
     pub mathematician: Id,
@@ -63,9 +64,10 @@ impl MathematicianRepo for sqlx::PgPool {
 
     async fn update_mathematician(&self, mathematician: &Mathematician) -> color_eyre::Result<()> {
         sqlx::query!(
-            "INSERT INTO mathematicians (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+            "INSERT INTO mathematicians (id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING",
             &mathematician.id.0,
-            &mathematician.name
+            // &mathematician.name.map(|s| s.as_str()),
+            mathematician.name,
         )
         .execute(self)
         .await?;
@@ -90,7 +92,7 @@ impl SchoolRepo for sqlx::PgPool {
 
     async fn update_school(&self, school: &School) -> color_eyre::Result<()> {
         sqlx::query!(
-            "INSERT INTO schools (name) VALUES ($1) ON CONFLICT (name) DO NOTHING",
+            "INSERT INTO schools (name) VALUES ($1) ON CONFLICT DO NOTHING",
             &school.name
         )
         .execute(self)
@@ -116,7 +118,7 @@ impl CountryRepo for sqlx::PgPool {
 
     async fn update_country(&self, country: &Country) -> color_eyre::Result<()> {
         sqlx::query!(
-            "INSERT INTO countries (name) VALUES ($1) ON CONFLICT (name) DO NOTHING",
+            "INSERT INTO countries (name) VALUES ($1) ON CONFLICT DO NOTHING",
             &country.name
         )
         .execute(self)
@@ -160,7 +162,7 @@ impl AdvisorRelationRepo for sqlx::PgPool {
     }
 
     async fn update_advisor_relation(&self, relation: &AdvisorRelation) -> color_eyre::Result<()> {
-        sqlx::query!("INSERT INTO advisor_relations (advisor, advisee) VALUES ($1, $2) ON CONFLICT (advisor, advisee) DO NOTHING", &relation.advisor.0, &relation.advisee.0)
+        sqlx::query!("INSERT INTO advisor_relations (advisor, advisee) VALUES ($1, $2) ON CONFLICT DO NOTHING", &relation.advisor.0, &relation.advisee.0)
             .execute(self)
             .await?;
         Ok(())
@@ -192,11 +194,13 @@ impl SchoolLocationRepo for sqlx::PgPool {
     }
 
     async fn update_location(&self, location: &SchoolLocation) -> color_eyre::Result<()> {
-        sqlx::query("INSERT INTO school_locations (school, country) VALUES ($1, $2) ON CONFLICT (school) DO NOTHING")
-            .bind(&location.school)
-            .bind(&location.country)
-            .execute(self)
-            .await?;
+        sqlx::query!(
+            "INSERT INTO school_locations (school, country) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            &location.school,
+            &location.country
+        )
+        .execute(self)
+        .await?;
         Ok(())
     }
 }
@@ -253,7 +257,7 @@ impl GraduationRecordRepo for sqlx::PgPool {
         map.fetch_optional(self).await.map_err(Into::into)
     }
     async fn update_graduation_record(&self, record: &GraduationRecord) -> color_eyre::Result<()> {
-        sqlx::query!("INSERT INTO graduation_records (mathematician, school, year) VALUES ($1, $2, $3) ON CONFLICT (mathematician) DO NOTHING", &record.mathematician.0, &record.school, record.year as i32)
+        sqlx::query!("INSERT INTO graduation_records (mathematician, school, year) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", &record.mathematician.0, &record.school, &record.year)
             .execute(self)
             .await?;
         Ok(())
