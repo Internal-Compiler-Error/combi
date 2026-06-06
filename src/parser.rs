@@ -21,7 +21,7 @@ lazy_static! {
     static ref TABLE_SECTOR: Selector = Selector::parse("table").unwrap();
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow, Copy, sqlx::Type)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow, Copy, sqlx::Type, PartialOrd, Ord)]
 pub struct Id(pub i32);
 
 impl Display for Id {
@@ -45,8 +45,8 @@ impl From<&i32> for Id {
 #[derive(Debug, PartialEq, Eq, Hash, Clone, FromRow)]
 /// A record of a mathematician and their students
 pub struct MGPage {
-    pub id: Id, 
-    
+    pub id: Id,
+
     /// The name of the main mathematician
     pub name: String,
 
@@ -63,7 +63,7 @@ pub struct MGPage {
     pub country: Option<String>,
 
     /// The year when the main mathematician graduated
-    pub year: Option<i16>,
+    pub year: Option<i32>,
 
     /// The title of the degree, such as "Ph.D."
     pub degree: Option<String>,
@@ -76,7 +76,7 @@ pub struct Student {
     pub name: String,
 
     /// The id of the student as stored in the mathgenealogy database
-    pub id: Option<Id>,
+    pub id: Id,
 
     /// The school where the student graduated
     pub school: Option<String>,
@@ -136,7 +136,13 @@ pub fn scrape_students(page: &Html) -> color_eyre::Result<Vec<Student>> {
             let name = cells.next()?;
 
             let href = name.select(&ANCHOR_SELECTOR).next()?.attr("href")?;
-            let id: Option<Id> = ID_RE.captures(href)?.get(1)?.as_str().parse().ok().map(Id);
+            let id: Id = ID_RE
+                .captures(href)?
+                .get(1)?
+                .as_str()
+                .parse::<i32>()
+                .expect("All students, if shown in the list, have an id")
+                .into();
 
             let name = parse_name(name.text().next()?);
 
@@ -209,13 +215,13 @@ fn parse_school(page: &Html) -> Option<&str> {
     Some(page.select(&DIV_SPAN).next()?.text().skip(1).next()?.trim())
 }
 
-fn parse_year(page: &Html) -> Option<i16> {
+fn parse_year(page: &Html) -> Option<i32> {
     let phd_section = page.select(&DIV_SPAN).next()?;
     let texts = phd_section.text();
 
     texts
         .map(|t| t.trim())
-        .filter_map(|t| t.parse::<i16>().ok())
+        .filter_map(|t| t.parse::<i32>().ok())
         .next()
 }
 
@@ -310,25 +316,25 @@ mod test {
         let expected = vec![
             Student {
                 name: "George Hutchinson".to_string(),
-                id: Some(Id(235835)),
+                id: 235835.into(),
                 school: Some("University of Guelph".to_string()),
                 year: Some(2018),
             },
             Student {
                 name: "Jeremy Levick".to_string(),
-                id: Some(Id(197636)),
+                id: 197636.into(),
                 school: Some("University of Guelph".to_string()),
                 year: Some(2015),
             },
             Student {
                 name: "Preeti Mohindru".to_string(),
-                id: Some(Id(190371)),
+                id: 190371.into(),
                 school: Some("University of Guelph".to_string()),
                 year: Some(2014),
             },
             Student {
                 name: "Jeffrey Tsang".to_string(),
-                id: Some(Id(190372)),
+                id: 190372.into(),
                 school: Some("University of Guelph".to_string()),
                 year: Some(2014),
             },

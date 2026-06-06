@@ -3,12 +3,11 @@
 mod mathematician;
 mod parser;
 
+use std::collections::{BTreeMap, VecDeque};
 use clap::Parser;
 use color_eyre::eyre::eyre;
 use lazy_static::lazy_static;
 use mathematician::Country;
-use mathematician::Dissertation;
-use mathematician::GraduationRecord;
 use mathematician::Mathematician;
 use mathematician::School;
 use mathematician::SchoolLocation;
@@ -17,27 +16,25 @@ use rand_distr::Uniform;
 use reqwest::Client;
 use scraper::Html;
 use scraper::Selector;
-use sqlx::{FromRow, PgPool};
+use sqlx::{Executor, FromRow, PgPool};
 
 use std::fmt::Debug;
-use std::ops::Sub;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use sqlx::types::chrono;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
-use tracing::debug;
+use tracing::{debug, trace};
 use tracing::error;
 use tracing::info;
 use tracing::instrument;
-use tracing::log::log;
 use tracing::warn;
 
 use crate::mathematician::AdvisorRelation;
 use crate::mathematician::AdvisorRelationRepo;
 use crate::mathematician::CountryRepo;
-use crate::mathematician::DissertationRepo;
-use crate::mathematician::GraduationRecordRepo;
 use crate::mathematician::MathematicianRepo;
 use crate::mathematician::SchoolLocationRepo;
 use crate::mathematician::SchoolRepo;
@@ -71,34 +68,14 @@ async fn insert_record(
     let mathematician = Mathematician {
         id: advisor.id,
         name: Some(advisor.name),
+        dissertation: advisor.dissertation,
+        graduating_year: advisor.year,
+        school: advisor.school.clone(),
     };
 
-    pool.upsert_mathematician(&mathematician).await?;
-    debug!("mathematician inserted");
-
-    if let Some(dissertation) = advisor.dissertation {
-        let dissertation = Dissertation {
-            title: dissertation,
-            author: advisor.id,
-        };
-
-        pool.upsert_dissertation(&dissertation).await?;
-        debug!("dissertation inserted");
-    }
 
     let country = advisor.country.map(|name| Country { name });
     let school = advisor.school.map(|name| School { name });
-    let year = advisor.year;
-
-    let grad_record = if country.is_some() && school.is_some() && year.is_some() {
-        Some(GraduationRecord {
-            mathematician: advisor.id,
-            school: school.clone().unwrap().name,
-            year: year.unwrap() as i32,
-        })
-    } else {
-        None
-    };
 
     let school_location = if country.is_some() && school.is_some() {
         Some(SchoolLocation {
@@ -124,19 +101,10 @@ async fn insert_record(
         debug!("school location inserted");
     }
 
-    if let Some(grad_record) = &grad_record {
-        pool.upsert_graduation_record(&grad_record).await?;
-        debug!("graduation record inserted");
-    }
 
+    pool.upsert_mathematician(&mathematician).await?;
+    debug!("mathematician inserted");
 
-    let _ = sqlx::query!(
-        "INSERT INTO scrape_logs(date, page_scraped, result) VALUES(NOW(), $1, 'success')",
-        advisor.id.0
-    )
-    .execute(pool)
-    .await
-    .inspect_err(|e| error!("Failed to insert {} to scrape log: {}))", advisor.id.0, e));
 
     Ok(())
 }
@@ -144,9 +112,9 @@ async fn insert_record(
 #[instrument(skip(pool))]
 async fn insert_relations(
     pool: &PgPool,
-    advisor: MGPage,
-    descendants: Vec<MGPage>) -> color_eyre::Result<()> {
-    for descendant in &descendants {
+    advisor: &MGPage,
+    descendants: &Vec<MGPage>) -> color_eyre::Result<()> {
+    for descendant in descendants {
         let relation = AdvisorRelation {
             advisor: advisor.id,
             advisee: descendant.id,
@@ -171,7 +139,16 @@ async fn insert_layer(
         insert_record(pool, descendant.clone()).await?;
     }
 
-    insert_relations(pool, advisor, descendants).await?;
+    insert_relations(pool, &advisor, &descendants).await?;
+
+    sqlx::query!(
+        "INSERT INTO scrape_logs(date, page_scraped, result) VALUES(NOW(), $1, 'success')",
+        advisor.id.0
+    )
+        .execute(pool)
+        .await
+        .inspect_err(|e| error!("Failed to insert {} to scrape log: {}))", advisor.id.0, e))?;
+
     Ok(())
 }
 #[derive(Debug)]
@@ -231,8 +208,8 @@ impl Scraper {
         }
     }
 
-    async fn get_record(&self, id: Id) -> color_eyre::Result<MGPage> {
-        async fn insert_to_bogus(id: Id, pool: Arc<sqlx::Pool<sqlx::Postgres>>) {
+    async fn download_and_parse(&self, id: Id) -> color_eyre::Result<MGPage> {
+        async fn log_failure(id: Id, pool: Arc<sqlx::Pool<sqlx::Postgres>>) {
             let _ = sqlx::query!("INSERT INTO scrape_logs(date, page_scraped, result) VALUES(NOW(), $1, 'failed')", id.0)
                 .execute(&*pool)
                 .await
@@ -248,7 +225,7 @@ impl Scraper {
 
             // Html is not send so we have to do this stupid nonsense
             tokio::spawn(async move {
-                insert_to_bogus(id, pool).await;
+                log_failure(id, pool).await;
             });
 
             return Err(eyre!("{id} is not a valid ID in their database"));
@@ -256,9 +233,91 @@ impl Scraper {
         let record = parser::scrape(id, &page)?;
         Ok(record)
     }
-    /// A layer is defined as one node and all the nodes connected to it, i.e. one layer of a tree
-    async fn get_single_layer(&self, root: Id) -> color_eyre::Result<(MGPage, Vec<MGPage>)> {
-        let root_page = self.scrape_single(root).await?;
+
+    async fn scrape_single(&self, id: Id) -> color_eyre::Result<Option<MGPage>> {
+        let now = chrono::Local::now();
+        let last_successful_scrape = sqlx::query_file_as!(LastScraped, "queries/latest_page_scrape_record.sql", id.0 as i64, "success")
+            .fetch_optional(&*self.db_pool)
+            .await?;
+
+        if let Some(last_scraped) = last_successful_scrape
+            && now.signed_duration_since(last_scraped.date).abs().to_std()? < Duration::from_hours(24)
+        {
+            return Ok(None)
+        }
+
+        info!("Working on {id}");
+
+        let advisor = self.download_and_parse(id).await?;
+        info!("Page {id} scrapped");
+        Ok(Some(advisor))
+    }
+
+    /// Return:
+    /// Error(e) -> something went wrong
+    /// Ok(None) -> the page doesn't exist (at all) or was recently scraped
+    /// Ok(page) -> page obtained from cache or freshly downloaded
+    async fn scrape_single_cached(&self, id: Id, cache: &RwLock<BTreeMap<Id, MGPage>>) -> color_eyre::Result<Option<MGPage>> {
+        // first, check if we have a cached version, then release the refcell
+        let has = {
+            cache.read().expect("not poisoned").contains_key(&id)
+        };
+        if has {
+            return Ok(cache.read().expect("not poisoned").get(&id).cloned())
+        }
+
+        // now we know it's not cached at the point of checking, download it
+        let page = self.scrape_single(id).await?;
+        match page {
+            None => Ok(None),
+            Some(page) => {
+                cache.write().expect("not poisoned").insert(id, page.clone());
+                Ok(Some(page))
+            }
+        }
+    }
+
+    async fn scrape_multiple_cached<I>(&self, ids: I, cache: &RwLock<BTreeMap<Id, MGPage>>) -> color_eyre::Result<Vec<MGPage>>
+    where
+        I: Iterator<Item=Id>,
+    {
+
+        let mut descendant_pages: FuturesUnordered<_> = ids
+            .map(|id| {
+                self.scrape_single_cached(id, cache)
+            })
+            .collect();
+
+        let mut descendants = vec![];
+        while let Some(Ok(Some(page))) = descendant_pages.next().await {
+            descendants.push(page);
+        }
+        Ok(descendants)
+    }
+
+    #[instrument(skip(self))]
+    async fn bfs_walk(&self, root: Id) -> color_eyre::Result<()> {
+        let mut q = VecDeque::new();
+        q.push_back(root);
+        let mut id2page = RwLock::new(BTreeMap::new());
+
+        while let Some(id) = q.pop_front() {
+            match self.visit(id, &mut id2page).await {
+                Ok((root, children)) => {
+                    q.extend(children);
+                    id2page.write().expect("not poisoned").remove(&root);
+                }
+                Err(e) => {
+                    warn!("Failed to visit {id}: {e}");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn visit(&self, root: Id, id2page: &RwLock<BTreeMap<Id, MGPage>>) -> color_eyre::Result<(Id, Vec<Id>)>     {
+        let root_page = self.scrape_single_cached(root, id2page).await?;
 
         if root_page.is_none() {
             info!("{root} doesn't have a page or was scraped in the last 24 hours");
@@ -266,56 +325,11 @@ impl Scraper {
         }
         let root_page = root_page.unwrap();
 
-        let mut descendants = vec![];
-        for descendant in &root_page.students {
-            if let Some(descendant_id) = descendant.id {
-                let descendant_page = self.scrape_single(descendant_id).await;
-                match descendant_page {
-                    Err(err) => {
-                        info!("{descendant_id}: {err}");
-                        continue
-                    },
-                    Ok(None) => {
-                        info!("{descendant_id}: doesn't have a page");
-                    },
-                    Ok(Some(descendant)) => {
-                        descendants.push(descendant);
-                    }
-                }
-            }
-        }
-        Ok((root_page, descendants))
-    }
+        let descendants = self.scrape_multiple_cached(root_page.students.iter().map(|s| s.id), id2page).await?;
 
-    #[instrument(skip(self))]
-    async fn scrape_single_layer(&self, root: Id) -> color_eyre::Result<()> {
-        let (advisor, descendants) = self.get_single_layer(root).await?;
-        insert_layer(&self.db_pool, advisor, descendants).await?;
-        Ok(())
-    }
+        insert_layer(&self.db_pool, root_page, descendants.clone()).await?;
 
-    #[instrument(skip(self))]
-    async fn scrape_single(&self, id: Id) -> color_eyre::Result<Option<MGPage>> {
-        // TODO: implement a logic where if the record has been updated recently, then skip it
-        // unless we are in a forced mode
-        // TODO: implement a force mode to skip this check
-        let now = chrono::Local::now();
-        let last_scraped = sqlx::query_file_as!(LastScraped, "queries/latest_page_scrape_record.sql", id.0 as i64)
-            .fetch_optional(&*self.db_pool)
-            .await?;
-
-
-        if let Some(last_scraped) = last_scraped
-            && now.signed_duration_since(last_scraped.date).abs().to_std()? < Duration::from_hours(24)
-        {
-            return Ok(None);
-        }
-
-        info!("Working on {id}");
-
-        let advisor = self.get_record(id).await?;
-        info!("Page {id} scrapped");
-        Ok(Some(advisor))
+        Ok((root, descendants.iter().map(|d| d.id).collect()))
     }
 }
 
@@ -342,19 +356,18 @@ async fn main() -> color_eyre::Result<()> {
     let scraper = Scraper {
         db_pool: Arc::clone(&pool),
         client: http_cli,
-        // semaphore: Semaphore::new(args.concurrency),
-        semaphore: Semaphore::new(1),
+        semaphore: Semaphore::new(args.concurrency),
     };
     let scraper = Arc::new(scraper);
 
     let mut tasks = vec![];
 
-    for id in 300..=600 {
+    for id in 101996..=101999 {
         let id = parser::Id(id);
         let scraper = Arc::clone(&scraper);
 
         let task = tokio::spawn(async move {
-            scraper.scrape_single_layer(id).await.inspect_err(|e| println!("{e}"));
+            let _ = scraper.bfs_walk(id).await.inspect_err(|e| eprintln!("{e}"));
         });
 
         tasks.push(task);

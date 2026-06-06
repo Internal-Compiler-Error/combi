@@ -13,6 +13,7 @@ create table schools(
 );
 
 -- this definition has issues, school and year really should be merged to the mathematician table itself
+-- 2026-06-05: it's been fixed in the next migration
 create table graduation_records(
     mathematician int not null references mathematicians primary key,
     school text references schools not null,
