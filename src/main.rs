@@ -16,7 +16,7 @@ use rand_distr::Uniform;
 use reqwest::Client;
 use scraper::Html;
 use scraper::Selector;
-use sqlx::{Executor, FromRow, PgPool};
+use sqlx::{FromRow, PgPool};
 
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
@@ -26,7 +26,7 @@ use futures::StreamExt;
 use sqlx::types::chrono;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
-use tracing::{debug, trace};
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::instrument;
@@ -58,11 +58,18 @@ struct LastScraped{
     result: String,
 }
 
-#[instrument(skip(pool))]
+#[instrument(skip(repo))]
 async fn insert_record(
-    pool: &PgPool,
+    repo: &mut sqlx::PgConnection,
     record: MGPage,
-) -> color_eyre::Result<()> {
+) -> color_eyre::Result<()>
+// The repo traits take `self` by value, so naming `repo` directly would move it on the
+// first call. Instead we reborrow (`&mut *repo`) at every call site: each reborrow is a
+// fresh `&'short mut PgConnection` whose borrow ends when its awaited call returns, which
+// is exactly what sqlx's `impl<'c> Executor<'c> for &'c mut PgConnection` wants. A generic
+// `&mut E` can't work here — it would demand `for<'a> &'a mut E: Executor<'a>`, but sqlx
+// ties the executor lifetime to the borrow, so that HRTB is never satisfiable.
+{
     let advisor = record;
 
     let mathematician = Mathematician {
@@ -87,40 +94,41 @@ async fn insert_record(
     };
 
     if let Some(country) = &country {
-        pool.update_country(&country).await?;
+        (&mut *repo).update_country(&country).await?;
         debug!("country inserted");
     }
 
     if let Some(school) = &school {
-        pool.update_school(&school).await?;
+        (&mut *repo).update_school(&school).await?;
         debug!("school inserted");
     }
 
     if let Some(school_location) = &school_location {
-        pool.update_location(&school_location).await?;
+        (&mut *repo).update_location(&school_location).await?;
         debug!("school location inserted");
     }
 
 
-    pool.upsert_mathematician(&mathematician).await?;
+    (&mut *repo).upsert_mathematician(&mathematician).await?;
     debug!("mathematician inserted");
 
 
     Ok(())
 }
 
-#[instrument(skip(pool))]
+#[instrument(skip(repo))]
 async fn insert_relations(
-    pool: &PgPool,
+    repo: &mut sqlx::PgConnection,
     advisor: &MGPage,
-    descendants: &Vec<MGPage>) -> color_eyre::Result<()> {
+    descendants: &Vec<MGPage>) -> color_eyre::Result<()>
+{
     for descendant in descendants {
         let relation = AdvisorRelation {
             advisor: advisor.id,
             advisee: descendant.id,
         };
 
-        pool.update_advisor_relation(&relation).await?;
+        (&mut *repo).update_advisor_relation(&relation).await?;
         debug!("{}->{}: {}->{} inserted", advisor.id, descendant.id, advisor.name, descendant.name);
     }
 
@@ -132,22 +140,24 @@ async fn insert_layer(
     pool: &PgPool,
     advisor: MGPage,
     descendants: Vec<MGPage>) -> color_eyre::Result<()> {
-    // TODO: wrap the following into a transaction
+    let mut tx = pool.begin().await?;
 
-    insert_record(pool, advisor.clone()).await?;
+    insert_record(&mut tx, advisor.clone()).await?;
     for descendant in &descendants {
-        insert_record(pool, descendant.clone()).await?;
+        insert_record(&mut tx, descendant.clone()).await?;
     }
 
-    insert_relations(pool, &advisor, &descendants).await?;
+    insert_relations(&mut tx, &advisor, &descendants).await?;
 
     sqlx::query!(
         "INSERT INTO scrape_logs(date, page_scraped, result) VALUES(NOW(), $1, 'success')",
         advisor.id.0
     )
-        .execute(pool)
+        .execute(&mut *tx)
         .await
-        .inspect_err(|e| error!("Failed to insert {} to scrape log: {}))", advisor.id.0, e))?;
+        .inspect_err(|e| error!("Failed to insert {} to scrape log: {})", advisor.id.0, e))?;
+
+    tx.commit().await?;
 
     Ok(())
 }
@@ -213,7 +223,7 @@ impl Scraper {
             let _ = sqlx::query!("INSERT INTO scrape_logs(date, page_scraped, result) VALUES(NOW(), $1, 'failed')", id.0)
                 .execute(&*pool)
                 .await
-                .inspect_err(|e| error!("We can't even insert into our log for {id}"));
+                .inspect_err(|e| error!("We can't even insert into our log for {id}: {e}"));
         }
 
         let url = format!("https://www.mathgenealogy.org/id.php?id={}", id.0);
@@ -362,7 +372,7 @@ async fn main() -> color_eyre::Result<()> {
 
     let mut tasks = vec![];
 
-    for id in 101996..=101999 {
+    for id in 6448..=6448 {
         let id = parser::Id(id);
         let scraper = Arc::clone(&scraper);
 
