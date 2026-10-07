@@ -33,17 +33,18 @@ docker compose up
 The site is empty until something is crawled. Search for anyone: a name with no matches here
 is looked up on MGP's own search, and every MGP result has a **Crawl** button (searching an MGP
 ID offers to crawl it directly). Or open someone, for example http://localhost:5173/m/10416
-for Donald Knuth, and press **Crawl this page**. A crawl
-fetches that one MGP page and stores the person along with their advisors and students as
-listed there; those people get their own crawl button until their pages are crawled too.
+for Donald Knuth, and press **Crawl their tree**.
 
-A page crawled in the last 14 days is not fetched again (`RECRAWL_AFTER_DAYS` in
-`web/shared/types.ts`), and neither is an ID MGP reported as missing. The same thing from a
-shell:
+A crawl fetches that person's page straight away, then walks their tree in the background
+(`web/worker/walk.ts`): their students, their students' students and so on, and their advisors up
+the line. Each step of a walk is a message on the `combi-crawl` queue that fetches up to 8
+pages and queues the next step a few seconds later; a walk stops after 2,000 fetches.
 
-```sh
-curl -X POST http://localhost:5173/api/mathematicians/10416/crawl
-```
+Pages are only fetched when due (`crawl_schedule`). Every crawl stores a hash of what the page
+said: unchanged, the page waits twice as long before the next check; changed, half as long
+(between 3 days and a year). New pages start at 14 days for people early in their career or with
+recent students, and up to 180 days for settled ones. A walk follows pages that aren't due
+through the database, so it still reaches everyone below them.
 
 ### Common tasks
 
@@ -79,7 +80,7 @@ To use a different database in development, set
 | `GET /api/search?q=&limit=` | People whose name matches, ignoring case and accents and tolerating typos. Words must appear in order; an all-digit query also matches the MGP ID |
 | `GET /api/mathematicians/{id}` | One person with their advisors, students and descendant count |
 | `GET /api/mathematicians/{id}/graph?up=&down=` | Their neighbourhood: `up` generations of advisors and `down` of students (0–6 each, capped at 1,500 people) |
-| `POST /api/mathematicians/{id}/crawl` | Fetches their MGP page into the database: `{"status": "crawled"}`, or `"fresh"` without fetching when it was crawled in the last 14 days. 404 when MGP has no such ID, 429 past the rate limit |
+| `POST /api/mathematicians/{id}/crawl` | Fetches their MGP page into the database (`"status": "crawled"`, or `"fresh"` when it isn't due) and starts a walk through their tree. 404 when MGP has no such ID, 429 past the rate limit |
 | `GET /api/mgp/search?q=` | MGP's own search, marking who is already in the database. One word is a family name; with more, the first is the given name and the last the family name. Shares the crawl rate limit |
 | `GET /api/countries` | Mathematicians and schools per country, by where the degree was awarded |
 | `GET /api/countries/{country}/schools` | That country's schools with their mathematician counts; `country` is MGP's name, e.g. `UnitedStates` |
@@ -87,6 +88,7 @@ To use a different database in development, set
 | `GET /api/schools/search?q=&limit=` | Schools whose name matches, with the same accent- and typo-tolerant matching as people |
 | `GET /api/flows?from=&to=` | Advisor–student links that cross borders, as advisor's degree country → student's, optionally for students who graduated in a year range; plus cross-border links per decade |
 | `GET /api/relation?a=&b=` | Two people's nearest shared academic ancestor and the shortest line down from it to each |
+| `GET /api/walks/{id}` | Progress of a walk started by a crawl: pages fetched, already up to date, not on MGP, and still to visit |
 | `GET /api/stats` | Counts for the whole database |
 | `GET /api/notable` | The 12 people with the most students on record |
 

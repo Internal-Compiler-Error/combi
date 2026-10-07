@@ -125,7 +125,7 @@ export function PersonPage() {
             {p.name}’s own page hasn’t been crawled yet; this is only what their advisors’ and students’ pages say.
           </p>
         )}
-        <CrawlButton id={p.id} lastCrawled={p.last_crawled} label={p.last_crawled ? "Crawl again" : "Crawl their page"} />
+        <CrawlButton id={p.id} lastCrawled={p.last_crawled} nextCrawl={p.next_crawl} walk={p.walk} label="Crawl their tree" />
         <Link className="ext" to={`/relate?a=${p.id}`}>
           How are they related to someone else? →
         </Link>
@@ -185,7 +185,7 @@ function Missing({ id }: { id?: number }) {
           "That isn’t a valid ID."
         )}
       </p>
-      {id !== undefined && <CrawlButton id={id} lastCrawled={null} label="Crawl this page" />}
+      {id !== undefined && <CrawlButton id={id} lastCrawled={null} nextCrawl={null} label="Crawl their tree" />}
     </main>
   );
 }

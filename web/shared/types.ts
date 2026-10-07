@@ -22,12 +22,37 @@ export type PersonDetail = Person & {
   descendant_count: number;
   /** ISO 8601 time their own page was last crawled; null when only other pages mention them */
   last_crawled: string | null;
+  /** when their page is next worth fetching (see crawl_schedule); null when never crawled */
+  next_crawl: string | null;
+  /** the latest walk started from them in the last day, if any */
+  walk: WalkStatus | null;
+};
+
+/** A background crawl through someone's students and advisors, started by their crawl button. */
+export type WalkStatus = {
+  id: number;
+  root: number;
+  /** "capped" stopped at MAX_WALK_FETCHES */
+  status: "running" | "done" | "capped";
+  /** pages fetched from MGP */
+  fetched: number;
+  /** pages not due for a recrawl, followed through the database instead */
+  skipped: number;
+  /** pages MGP doesn't have */
+  failed: number;
+  /** pages still to visit */
+  todo: number;
 };
 
 export type CrawlResult = {
-  /** "fresh": crawled within RECRAWL_AFTER_DAYS, so the page was not fetched again */
+  /** "fresh": the page isn't due for a recrawl, so it wasn't fetched again */
   status: "crawled" | "fresh";
   last_crawled: string;
+  next_crawl: string;
+  /** whether the page differed from the last crawl; null on a first crawl */
+  changed: boolean | null;
+  /** the walk through their tree, when the deployment has a crawl queue */
+  walk: WalkStatus | null;
 };
 
 export type GraphNode = Person & {
@@ -72,6 +97,7 @@ export type MgpHit = {
   known: boolean;
   /** when their own page was last crawled, as in PersonDetail */
   last_crawled: string | null;
+  next_crawl: string | null;
 };
 
 /** Mathematicians by the country of the school they graduated from. */
@@ -128,7 +154,12 @@ export const MAX_GRAPH_NODES = 1500;
 export const MAX_SCHOOL_PEOPLE = 2000;
 /** how many generations up the relation finder looks from each person */
 export const MAX_RELATION_DEPTH = 60;
-/** a page crawled more recently than this is not fetched again */
-export const RECRAWL_AFTER_DAYS = 14;
+/** a page's recrawl interval stays within these; it halves when a crawl finds changes and doubles when not */
+export const MIN_RECRAWL_DAYS = 3;
+export const MAX_RECRAWL_DAYS = 365;
+/** an ID MGP said it doesn't have is asked about again after this long */
+export const NOT_FOUND_RECHECK_DAYS = 30;
+/** a walk stops after fetching this many pages */
+export const MAX_WALK_FETCHES = 2000;
 
 export const mgpUrl = (id: number) => `https://www.mathgenealogy.org/id.php?id=${id}`;

@@ -1,6 +1,6 @@
 import { parse, type HTMLElement } from "node-html-parser";
 import type postgres from "postgres";
-import { mgpUrl, RECRAWL_AFTER_DAYS, type CrawlResult } from "../shared/types";
+import { MAX_RECRAWL_DAYS, MIN_RECRAWL_DAYS, mgpUrl, NOT_FOUND_RECHECK_DAYS } from "../shared/types";
 
 type Ref = { id: number; name: string };
 export type Student = Ref & { school: string | null; year: number | null };
@@ -130,19 +130,53 @@ export const parseSearchResults = (html: string): Student[] =>
 const unique = <T>(xs: T[]) => [...new Set(xs)];
 const byId = <T extends Ref>(xs: T[]) => [...new Map(xs.map((x) => [x.id, x])).values()];
 
+const DAY = 86_400_000;
+
+/** What a crawl of one page did, and when that page is next worth fetching. */
+export type PageCrawl = { status: "crawled" | "fresh"; last_crawled: Date; next_crawl: Date; changed: boolean | null };
+
 /**
- * Crawl one person's page, unless it was crawled in the last RECRAWL_AFTER_DAYS days. Their
- * advisors and students are stored from what the page says about them (name, and school and
- * year for students) without being crawled themselves; a later crawl of theirs fills in the rest.
+ * The first recrawl interval, before there's any history of changes: someone with a recent degree
+ * or recent students may still gain students; someone whose last student graduated decades ago won't.
  */
-export async function crawl(sql: postgres.Sql, id: number, fetchPage: FetchPage = fetchMgpPage, now = new Date()): Promise<CrawlResult> {
-  const [last] = await sql<{ date: Date; result: string }[]>`
-    select date, result from scrape_logs
-    where page_scraped = ${id} and result in ('success', 'failed')
-    order by date desc, id desc limit 1`;
-  if (last && now.getTime() - new Date(last.date).getTime() < RECRAWL_AFTER_DAYS * 86_400_000) {
-    if (last.result === "failed") throw new MgpNotFound();
-    return { status: "fresh", last_crawled: new Date(last.date).toISOString() };
+export function firstInterval(page: MgpPage, now: Date): number {
+  const latest = Math.max(page.year ?? 0, ...page.students.map((s) => s.year ?? 0));
+  const year = now.getUTCFullYear();
+  // early in a career (a degree in the last 25 years) or still graduating students
+  if (page.year === null || page.year >= year - 25 || latest >= year - 10) return 14;
+  return latest >= year - 40 ? 60 : 180;
+}
+
+/** Halve the interval when the page changed, double it when it didn't, within the bounds. */
+export const nextInterval = (previous: number, changed: boolean) =>
+  Math.min(MAX_RECRAWL_DAYS, Math.max(MIN_RECRAWL_DAYS, changed ? previous / 2 : previous * 2));
+
+async function contentHash(page: MgpPage): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(page)));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Crawl one person's page unless it isn't due yet (see crawl_schedule). Their advisors and
+ * students are stored from what the page says about them (name, and school and year for students)
+ * without being crawled themselves; a later crawl of theirs fills in the rest.
+ */
+export async function crawl(sql: postgres.Sql, id: number, fetchPage: FetchPage = fetchMgpPage, now = new Date()): Promise<PageCrawl> {
+  // pages crawled before the schedule existed, or by an older crawler, fall back to the log
+  const [known] = await sql<{ last: Date | null; next: Date | null; interval_days: number | null; content_hash: string | null; missing: Date | null }[]>`
+    select coalesce(s.last_crawled, l.last) as last,
+           coalesce(s.next_due, l.last + interval '14 days') as next,
+           s.interval_days, s.content_hash,
+           (select max(date) from scrape_logs where page_scraped = ${id} and result = 'failed') as missing
+    from (select ${id}::int as page) p
+    left join crawl_schedule s on s.page = p.page
+    left join lateral (select max(date) as last from scrape_logs where page_scraped = p.page and result = 'success') l on true`;
+  const last = known?.last ? new Date(known.last) : null;
+  if (known?.missing && (!last || last < new Date(known.missing)) && now.getTime() - new Date(known.missing).getTime() < NOT_FOUND_RECHECK_DAYS * DAY) {
+    throw new MgpNotFound();
+  }
+  if (last && known?.next && now < new Date(known.next)) {
+    return { status: "fresh", last_crawled: last, next_crawl: new Date(known.next), changed: null };
   }
 
   const page = parsePage(id, await fetchPage(id));
@@ -150,6 +184,11 @@ export async function crawl(sql: postgres.Sql, id: number, fetchPage: FetchPage 
     await sql`insert into scrape_logs (date, page_scraped, result) values (${now}, ${id}, 'failed')`;
     throw new MgpNotFound();
   }
+
+  const hash = await contentHash(page);
+  const changed = known?.content_hash ? hash !== known.content_hash : null;
+  const interval = changed === null || known?.interval_days == null ? firstInterval(page, now) : nextInterval(known.interval_days, changed);
+  const next = new Date(now.getTime() + interval * DAY);
 
   const students = byId(page.students.filter((s) => s.id !== id));
   const advisors = byId(page.advisors.filter((a) => a.id !== id));
@@ -178,7 +217,13 @@ export async function crawl(sql: postgres.Sql, id: number, fetchPage: FetchPage 
     if (relations.length) await tx`insert into advisor_relations ${tx(relations)} on conflict do nothing`;
 
     await tx`insert into scrape_logs (date, page_scraped, result) values (${now}, ${id}, 'success')`;
+    await tx`
+      insert into crawl_schedule (page, last_crawled, next_due, interval_days, content_hash, changes)
+      values (${id}, ${now}, ${next}, ${interval}, ${hash}, ${changed ? 1 : 0})
+      on conflict (page) do update set last_crawled = excluded.last_crawled, next_due = excluded.next_due,
+        interval_days = excluded.interval_days, content_hash = excluded.content_hash,
+        crawls = crawl_schedule.crawls + 1, changes = crawl_schedule.changes + excluded.changes`;
   });
 
-  return { status: "crawled", last_crawled: now.toISOString() };
+  return { status: "crawled", last_crawled: now, next_crawl: next, changed };
 }

@@ -19,8 +19,10 @@ import {
   type SchoolHit,
   type SchoolStat,
   type Stats,
+  type WalkStatus,
 } from "../shared/types";
 import { prettyCountry } from "../shared/names";
+import { latestWalk, startWalk, walkStatus } from "./walk";
 import { crawl, fetchMgpPage, fetchMgpSearch, mgpQuery, MgpNotFound, parseSearchResults, UpstreamError, type FetchPage, type FetchSearch } from "./crawl";
 
 type Sql = postgres.Sql;
@@ -80,6 +82,19 @@ async function withinMgpLimit(env: Env, ip: string | undefined): Promise<boolean
   const outcome = await env.MGP_LIMITER?.limit({ key: ip ?? "unknown" });
   return outcome?.success ?? true;
 }
+
+type Crawled = { last_crawled: Date | null; next_crawl: Date | null };
+
+// When someone's own page was last crawled and is next due, from the schedule or, for pages
+// crawled before it existed, two weeks after the log's last success (as crawl() does).
+const crawledColumns = (sql: Sql) => sql`
+  coalesce((select last_crawled from crawl_schedule where page = m.id),
+           (select max(date) from scrape_logs where page_scraped = m.id and result = 'success')) as last_crawled,
+  coalesce((select next_due from crawl_schedule where page = m.id),
+           (select max(date) + interval '14 days' from scrape_logs where page_scraped = m.id and result = 'success')) as next_crawl`;
+
+const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
+const crawledFields = (r: Crawled) => ({ last_crawled: iso(r.last_crawled), next_crawl: iso(r.next_crawl) });
 
 export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSearch }: { fetchPage?: FetchPage; fetchSearch?: FetchSearch } = {}) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath("/api");
@@ -142,13 +157,12 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
     const sql = c.var.sql;
     const id = Number(c.req.param("id"));
 
-    const [row] = await sql<(PersonRow & { dissertation: string | null; last_crawled: Date | null })[]>`
-      select ${personColumns(sql)}, m.dissertation,
-             (select max(date) from scrape_logs where page_scraped = m.id and result = 'success') as last_crawled
+    const [row] = await sql<(PersonRow & { dissertation: string | null } & Crawled)[]>`
+      select ${personColumns(sql)}, m.dissertation, ${crawledColumns(sql)}
       from mathematicians m where m.id = ${id}`;
     if (!row) throw new NotFound();
 
-    const [advisors, students, [{ count }]] = await Promise.all([
+    const [advisors, students, [{ count }], walk] = await Promise.all([
       sql<PersonRow[]>`
         select ${personColumns(sql)}
         from advisor_relations r join mathematicians m on m.id = r.advisor
@@ -166,6 +180,7 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
           select r.advisee from advisor_relations r join d on r.advisor = d.id
         )
         select count(*)::int as count from d`,
+      latestWalk(sql, id),
     ]);
 
     return c.json<PersonDetail>({
@@ -174,7 +189,8 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
       advisors: advisors.map(toPerson),
       students: students.map(toPerson),
       descendant_count: count,
-      last_crawled: row.last_crawled ? new Date(row.last_crawled).toISOString() : null,
+      ...crawledFields(row),
+      walk,
     });
   });
 
@@ -183,7 +199,27 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
     if (id < 1 || id > 2 ** 31 - 1) return c.json<ApiErrorBody>({ error: "Not a valid MGP ID" }, 400);
 
     if (!(await withinMgpLimit(c.env, c.req.header("cf-connecting-ip")))) return c.json<ApiErrorBody>({ error: "Too many requests to MGP; try again in a minute" }, 429);
-    return c.json<CrawlResult>(await crawl(c.var.sql, id, fetchPage));
+
+    // their own page now, so it shows straight away; the rest of their tree in the background
+    const page = await crawl(c.var.sql, id, fetchPage);
+    let walk: WalkStatus | null = null;
+    if (c.env.CRAWL_QUEUE) {
+      const started = await startWalk(c.var.sql, id);
+      if (started.started) await c.env.CRAWL_QUEUE.send({ walk: started.walk.id });
+      walk = started.walk;
+    }
+    return c.json<CrawlResult>({
+      status: page.status,
+      last_crawled: page.last_crawled.toISOString(),
+      next_crawl: page.next_crawl.toISOString(),
+      changed: page.changed,
+      walk,
+    });
+  });
+
+  app.get("/walks/:id{[0-9]+}", async (c) => {
+    const walk = await walkStatus(c.var.sql, Number(c.req.param("id")));
+    return walk ? c.json<WalkStatus>(walk) : c.json<ApiErrorBody>({ error: "No such walk" }, 404);
   });
 
   /** MGP's own search, for people we haven't crawled; each hit says whether we already have them. */
@@ -196,14 +232,14 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
     if (!hits.length) return c.json<MgpHit[]>([]);
     // an array literal, as in the graph query: these are integers parsed from MGP's links
     const ids = `{${hits.map((h) => h.id).join(",")}}`;
-    const known = await c.var.sql<{ id: number; last_crawled: Date | null }[]>`
-      select m.id, (select max(date) from scrape_logs where page_scraped = m.id and result = 'success') as last_crawled
-      from mathematicians m where m.id = any(${ids}::int[])`;
-    const byId = new Map(known.map((k) => [k.id, k.last_crawled]));
+    const sql = c.var.sql;
+    const known = await sql<({ id: number } & Crawled)[]>`
+      select m.id, ${crawledColumns(sql)} from mathematicians m where m.id = any(${ids}::int[])`;
+    const byId = new Map(known.map((k) => [k.id, k]));
     return c.json<MgpHit[]>(
       hits.map((h) => {
-        const lastCrawled = byId.get(h.id);
-        return { ...h, known: byId.has(h.id), last_crawled: lastCrawled ? new Date(lastCrawled).toISOString() : null };
+        const k = byId.get(h.id);
+        return { ...h, known: k !== undefined, ...(k ? crawledFields(k) : { last_crawled: null, next_crawl: null }) };
       }),
     );
   });

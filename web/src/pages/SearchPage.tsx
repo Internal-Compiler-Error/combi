@@ -86,7 +86,7 @@ function MissingId({ id }: { id: number }) {
   return (
     <section className="mgp">
       <p className="muted">MGP ID {id} isn’t in the database yet.</p>
-      <CrawlButton id={id} lastCrawled={null} label={`Crawl MGP ID ${id}`} />
+      <CrawlButton id={id} lastCrawled={null} nextCrawl={null} label={`Crawl MGP ID ${id}`} />
     </section>
   );
 }
@@ -139,7 +139,7 @@ function MgpResults({ q, auto }: { q: string; auto: boolean }) {
                     <td className="num mono">{h.year ?? "—"}</td>
                     <td className="muted">{h.school ?? "—"}</td>
                     <td className="num">
-                      <CrawlButton id={h.id} lastCrawled={h.last_crawled} label="Crawl" compact />
+                      <CrawlButton id={h.id} lastCrawled={h.last_crawled} nextCrawl={h.next_crawl} label="Crawl" compact />
                     </td>
                   </tr>
                 ))}

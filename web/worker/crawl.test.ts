@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, inject, test, vi } from "vitest";
-import type { CrawlResult, MgpHit, PersonDetail, Relation } from "../shared/types";
+import postgres from "postgres";
+import { afterAll, describe, expect, inject, test, vi } from "vitest";
+import type { CrawlResult, MgpHit, PersonDetail, Relation, WalkStatus } from "../shared/types";
 import { createApp } from "./app";
-import { mgpQuery, parsePage, parseSearchResults, type MgpQuery } from "./crawl";
+import { crawl, firstInterval, mgpQuery, nextInterval, parsePage, parseSearchResults, type MgpQuery } from "./crawl";
+import { startWalk, walkStep } from "./walk";
 
 const fixture = (name: string) => readFileSync(join(import.meta.dirname, "test/fixtures/mgp", `${name}.html`), "utf8");
 const pages: Record<number, string> = { 10416: fixture("knuth"), 135101: fixture("rajesh") };
@@ -138,4 +140,84 @@ describe("crawl", () => {
   });
 
   test("rejects IDs out of range", async () => expect((await post(0)).status).toBe(400));
+});
+
+describe("recrawl schedule", () => {
+  const year = new Date().getUTCFullYear();
+  const page = (y: number | null, studentYears: number[]) => ({ ...parsePage(1, fixture("Tai-Yih"))!, year: y, students: studentYears.map((s, i) => ({ id: i, name: "", school: null, year: s })) });
+
+  test("starts short for people still taking students, long for settled pages", () => {
+    expect(firstInterval(page(year - 3, []), new Date())).toBe(14);
+    expect(firstInterval(page(1960, [year - 2]), new Date())).toBe(14);
+    expect(firstInterval(page(1960, [1990]), new Date())).toBe(60);
+    expect(firstInterval(page(1900, [1930]), new Date())).toBe(180);
+  });
+
+  test("halves on a change and doubles otherwise, within bounds", () => {
+    expect(nextInterval(14, false)).toBe(28);
+    expect(nextInterval(14, true)).toBe(7);
+    expect(nextInterval(4, true)).toBe(3);
+    expect(nextInterval(300, false)).toBe(365);
+  });
+});
+
+describe("adaptive recrawling and walks", () => {
+  const sql = postgres(inject("emptyDatabaseUrl"), { max: 1, fetch_types: false, onnotice: () => {} });
+  afterAll(() => sql.end());
+  const DAY = 86_400_000;
+  const missing = "<html><body><p>You have specified an ID that does not exist in the database. Please back up and try again.</p></body></html>";
+  let html = fixture("Tai-Yih");
+  const fetchPage = vi.fn(async (id: number) => (id === 777 ? html : missing));
+
+  test("a page that doesn't change is checked less and less often, one that does more often", async () => {
+    const t0 = new Date("2026-01-01T00:00:00Z");
+    const first = await crawl(sql, 777, fetchPage, t0);
+    expect(first).toMatchObject({ status: "crawled", changed: null });
+    const days = (from: Date, to: Date) => (to.getTime() - from.getTime()) / DAY;
+    const firstGap = days(first.last_crawled, first.next_crawl);
+
+    expect((await crawl(sql, 777, fetchPage, new Date(t0.getTime() + DAY))).status).toBe("fresh");
+
+    const t1 = first.next_crawl;
+    const second = await crawl(sql, 777, fetchPage, t1);
+    expect(second).toMatchObject({ status: "crawled", changed: false });
+    expect(days(t1, second.next_crawl)).toBe(firstGap * 2);
+
+    html = html.replace("</h2>", " Jr.</h2>");
+    const t2 = second.next_crawl;
+    const third = await crawl(sql, 777, fetchPage, t2);
+    expect(third).toMatchObject({ status: "crawled", changed: true });
+    expect(days(t2, third.next_crawl)).toBe(firstGap);
+  });
+
+  test("the crawl button starts a walk once and queues its first step", async () => {
+    const send = vi.fn();
+    const app = createApp({ fetchPage: async (id) => pages[id] ?? missing });
+    const env = { HYPERDRIVE: { connectionString: inject("emptyDatabaseUrl") }, CRAWL_QUEUE: { send } };
+    const res = (await (await app.request("/api/mathematicians/10416/crawl", { method: "POST" }, env)).json()) as CrawlResult;
+    expect(res.walk).toMatchObject({ root: 10416, status: "running", todo: 1 });
+    expect(send).toHaveBeenCalledWith({ walk: res.walk!.id });
+
+    const again = (await (await app.request("/api/mathematicians/10416/crawl", { method: "POST" }, env)).json()) as CrawlResult;
+    expect(again.walk!.id).toBe(res.walk!.id);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  test("a walk goes down through students and up through advisors until it runs out", async () => {
+    const { walk } = await startWalk(sql, 10416);
+    let step;
+    while ((step = await walkStep(sql, walk.id, { fetchPage: async (id) => pages[id] ?? missing })) === "more");
+    expect(step).toBe("done");
+    const [w] = await sql<WalkStatus[]>`select status, fetched, skipped, failed from crawl_walks where id = ${walk.id}`;
+    const students = parsePage(10416, pages[10416]!)!.students.length;
+    // Knuth was just crawled, so he is skipped; his students and his advisor aren't on MGP in this test
+    expect(w).toMatchObject({ status: "done", fetched: 0, skipped: 1, failed: students + 1 });
+  });
+
+  test("a walk stops at its fetch limit", async () => {
+    const { walk } = await startWalk(sql, 135101);
+    expect(await walkStep(sql, walk.id, { fetchPage: async (id) => pages[id] ?? missing, maxFetches: 0 })).toBe("done");
+    const [w] = await sql<WalkStatus[]>`select status from crawl_walks where id = ${walk.id}`;
+    expect(w!.status).toBe("capped");
+  });
 });

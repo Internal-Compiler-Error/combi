@@ -1,8 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ApiErrorBody, CountryStat, CrawlResult, Flows, Graph, GraphParams, MgpHit, Person, PersonDetail, Relation, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../../shared/types";
+import type { ApiErrorBody, CountryStat, CrawlResult, Flows, Graph, GraphParams, MgpHit, Person, PersonDetail, Relation, SchoolDetail, SchoolHit, SchoolStat, Stats, WalkStatus } from "../../shared/types";
 
-export type { CountryStat, CrawlResult, Flows, Graph, GraphNode, GraphLink, MgpHit, Person, PersonDetail, Relation, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../../shared/types";
-export { MAX_SCHOOL_PEOPLE, mgpUrl, RECRAWL_AFTER_DAYS } from "../../shared/types";
+export type { CountryStat, CrawlResult, Flows, Graph, GraphNode, GraphLink, MgpHit, Person, PersonDetail, Relation, SchoolDetail, SchoolHit, SchoolStat, Stats, WalkStatus } from "../../shared/types";
+export { MAX_SCHOOL_PEOPLE, mgpUrl } from "../../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -83,8 +83,8 @@ export const useGraph = (id: number, params: Required<GraphParams>) =>
     placeholderData: keepPreviousData,
   });
 
-/** Fetch someone's page from MGP into the database, then refresh everything: the crawl can add
- * people and links that show up on other pages too. */
+/** Fetch someone's page from MGP into the database and start walking their tree, then refresh
+ * everything: the crawl can add people and links that show up on other pages too. */
 export function useCrawl(id: number) {
   const client = useQueryClient();
   return useMutation({
@@ -92,6 +92,17 @@ export function useCrawl(id: number) {
     onSuccess: () => client.invalidateQueries(),
   });
 }
+
+/** A walk's progress, polled every couple of seconds while it runs. */
+export const useWalk = (initial: WalkStatus | null) =>
+  useQuery({
+    queryKey: ["walk", initial?.id],
+    queryFn: () => get<WalkStatus>(`/walks/${initial!.id}`),
+    enabled: initial !== null,
+    initialData: initial ?? undefined,
+    staleTime: 0,
+    refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
+  });
 
 /** "Ph.D. 1963 · California Institute of Technology" */
 export function degreeLine(p: Pick<Person, "year" | "school">): string {

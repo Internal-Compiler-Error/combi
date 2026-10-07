@@ -27,6 +27,12 @@
   "ratelimits": [
     { "name": "MGP_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }
   ],
+  // Crawl walks through someone's students and advisors, a step per message (worker/walk.ts).
+  // One consumer at a time keeps MGP's load to one walk step every few seconds.
+  "queues": {
+    "producers": [{ "binding": "CRAWL_QUEUE", "queue": "combi-crawl" }],
+    "consumers": [{ "queue": "combi-crawl", "max_batch_size": 1, "max_concurrency": 1, "max_retries": 3 }]
+  },
   "observability": {
     "logs": {
       "enabled": true,
