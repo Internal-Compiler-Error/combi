@@ -20,6 +20,11 @@
       "localConnectionString": "postgres://combi:combi@localhost:5432/combi"
     }
   ],
+  // Crawls fetch from MGP, a volunteer-run site; cap them per visitor (see POST .../crawl).
+  // namespace_id is any number unique among this account's rate limiters.
+  "ratelimits": [
+    { "name": "CRAWL_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }
+  ],
   "observability": {
     "logs": {
       "enabled": true,

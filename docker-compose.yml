@@ -1,18 +1,14 @@
 # `docker compose up` starts everything needed to work on the site:
 #   web  http://localhost:5173  Vite + the API worker in the Workers runtime, both hot-reloading
 #   db   localhost:5432         Postgres (user combi, no password needed)
-# Run the scraper or anything else Rust with: docker compose run --rm dev <command>
+# Run sqlx or psql with: docker compose run --rm dev <command>
 
-x-rust: &rust
+x-tools: &tools
   build: .
   environment:
-    # compile-time database for sqlx's query! macros, and the runtime database
     DATABASE_URL: postgres://combi@db/combi
   volumes:
     - .:/workspace
-    - cargo-registry:/usr/local/cargo/registry
-    - cargo-git:/usr/local/cargo/git
-    - target:/target
 
 services:
   db:
@@ -33,7 +29,7 @@ services:
       retries: 15
 
   migrate:
-    <<: *rust
+    <<: *tools
     command: sqlx migrate run
     depends_on:
       db:
@@ -55,13 +51,10 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # a shell with the Rust toolchain; not started by `up`
+  # a shell with sqlx-cli and psql; not started by `up`
   dev:
-    <<: *rust
+    <<: *tools
     profiles: [tools]
-    environment:
-      DATABASE_URL: postgres://combi@db/combi
-      CARGO_TARGET_DIR: /target/dev
     depends_on:
       db:
         condition: service_healthy
@@ -70,7 +63,4 @@ services:
 
 volumes:
   pgdata:
-  cargo-registry:
-  cargo-git:
-  target:
   web-node-modules:

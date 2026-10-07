@@ -1,7 +1,8 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { ApiErrorBody, Graph, GraphParams, Person, PersonDetail, Stats } from "../../shared/types";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ApiErrorBody, CrawlResult, Graph, GraphParams, Person, PersonDetail, Stats } from "../../shared/types";
 
-export type { Graph, GraphNode, GraphLink, Person, PersonDetail, Stats } from "../../shared/types";
+export type { CrawlResult, Graph, GraphNode, GraphLink, Person, PersonDetail, Stats } from "../../shared/types";
+export { mgpUrl, RECRAWL_AFTER_DAYS } from "../../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -12,16 +13,18 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+async function request<T>(method: "GET" | "POST", path: string, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(`/api${path}`, window.location.origin);
   for (const [k, v] of Object.entries(params ?? {})) if (v !== undefined) url.searchParams.set(k, String(v));
-  const res = await fetch(url);
+  const res = await fetch(url, { method });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as ApiErrorBody | null;
     throw new ApiError(body?.error ?? `Request failed (${res.status})`, res.status);
   }
   return res.json() as Promise<T>;
 }
+
+const get = <T>(path: string, params?: Record<string, string | number | undefined>) => request<T>("GET", path, params);
 
 export const useStats = () => useQuery({ queryKey: ["stats"], queryFn: () => get<Stats>("/stats") });
 
@@ -45,9 +48,17 @@ export const useGraph = (id: number, params: Required<GraphParams>) =>
     placeholderData: keepPreviousData,
   });
 
+/** Fetch someone's page from MGP into the database, then refresh everything: the crawl can add
+ * people and links that show up on other pages too. */
+export function useCrawl(id: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => request<CrawlResult>("POST", `/mathematicians/${id}/crawl`),
+    onSuccess: () => client.invalidateQueries(),
+  });
+}
+
 /** "Ph.D. 1963 · California Institute of Technology" */
 export function degreeLine(p: Pick<Person, "year" | "school">): string {
   return [p.year ? `Ph.D. ${p.year}` : "Year unknown", p.school].filter(Boolean).join(" · ");
 }
-
-export const mgpUrl = (id: number) => `https://www.mathgenealogy.org/id.php?id=${id}`;

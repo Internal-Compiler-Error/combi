@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import postgres from "postgres";
-import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, type ApiErrorBody, type Graph, type GraphLink, type Person, type PersonDetail, type Stats } from "../shared/types";
+import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, type ApiErrorBody, type CrawlResult, type Graph, type GraphLink, type Person, type PersonDetail, type Stats } from "../shared/types";
+import { crawl, fetchMgpPage, MgpNotFound, UpstreamError, type FetchPage } from "./crawl";
 
 type Sql = postgres.Sql;
 type Vars = { sql: Sql };
@@ -48,7 +49,7 @@ const personColumns = (sql: Sql | postgres.TransactionSql) => sql`
   (select string_agg(country, ', ' order by country) from school_locations l where l.school = m.school) as country,
   (select count(*)::int from advisor_relations sc where sc.advisor = m.id) as student_count`;
 
-export function createApp() {
+export function createApp({ fetchPage = fetchMgpPage }: { fetchPage?: FetchPage } = {}) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath("/api");
 
   // One small connection pool per request: Hyperdrive does the real pooling at the edge.
@@ -69,6 +70,8 @@ export function createApp() {
 
   app.onError((err, c) => {
     if (err instanceof NotFound) return c.json<ApiErrorBody>({ error: "No mathematician with that ID is in the database" }, 404);
+    if (err instanceof MgpNotFound) return c.json<ApiErrorBody>({ error: "The Mathematics Genealogy Project has no one with that ID" }, 404);
+    if (err instanceof UpstreamError) return c.json<ApiErrorBody>({ error: err.message }, 502);
     console.error(err);
     return c.json<ApiErrorBody>({ error: "Database error" }, 500);
   });
@@ -107,8 +110,10 @@ export function createApp() {
     const sql = c.var.sql;
     const id = Number(c.req.param("id"));
 
-    const [row] = await sql<(PersonRow & { dissertation: string | null })[]>`
-      select ${personColumns(sql)}, m.dissertation from mathematicians m where m.id = ${id}`;
+    const [row] = await sql<(PersonRow & { dissertation: string | null; last_crawled: Date | null })[]>`
+      select ${personColumns(sql)}, m.dissertation,
+             (select max(date) from scrape_logs where page_scraped = m.id and result = 'success') as last_crawled
+      from mathematicians m where m.id = ${id}`;
     if (!row) throw new NotFound();
 
     const [advisors, students, [{ count }]] = await Promise.all([
@@ -137,7 +142,19 @@ export function createApp() {
       advisors: advisors.map(toPerson),
       students: students.map(toPerson),
       descendant_count: count,
+      last_crawled: row.last_crawled ? new Date(row.last_crawled).toISOString() : null,
     });
+  });
+
+  app.post("/mathematicians/:id{[0-9]+}/crawl", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (id < 1 || id > 2 ** 31 - 1) return c.json<ApiErrorBody>({ error: "Not a valid MGP ID" }, 400);
+
+    // every crawl that isn't fresh fetches from MGP, a volunteer-run site
+    const limited = await c.env.CRAWL_LIMITER?.limit({ key: c.req.header("cf-connecting-ip") ?? "unknown" });
+    if (limited && !limited.success) return c.json<ApiErrorBody>({ error: "Too many crawls; try again in a minute" }, 429);
+
+    return c.json<CrawlResult>(await crawl(c.var.sql, id, fetchPage));
   });
 
   app.get("/mathematicians/:id{[0-9]+}/graph", async (c) => {

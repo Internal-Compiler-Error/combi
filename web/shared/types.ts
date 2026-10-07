@@ -18,6 +18,14 @@ export type PersonDetail = Person & {
   students: Person[];
   /** all descendants reachable in the database, counted once each */
   descendant_count: number;
+  /** ISO 8601 time their own page was last crawled; null when only other pages mention them */
+  last_crawled: string | null;
+};
+
+export type CrawlResult = {
+  /** "fresh": crawled within RECRAWL_AFTER_DAYS, so the page was not fetched again */
+  status: "crawled" | "fresh";
+  last_crawled: string;
 };
 
 export type GraphNode = Person & {
@@ -56,3 +64,7 @@ export type ApiErrorBody = { error: string };
 
 export const MAX_GRAPH_DEPTH = 6;
 export const MAX_GRAPH_NODES = 1500;
+/** a page crawled more recently than this is not fetched again */
+export const RECRAWL_AFTER_DAYS = 14;
+
+export const mgpUrl = (id: number) => `https://www.mathgenealogy.org/id.php?id=${id}`;

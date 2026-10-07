@@ -1,18 +1,16 @@
 # Combi
 
-Crawls the [Mathematics Genealogy Project](https://www.mathgenealogy.org) into Postgres and
-serves a website to search every mathematician in the database and explore their advisors
-and students. The site runs on Cloudflare Workers.
+A website to search mathematicians from the [Mathematics Genealogy Project](https://www.mathgenealogy.org)
+(MGP) and explore their advisors and students. Visitors crawl MGP pages into Postgres on
+demand from the site itself. It runs on Cloudflare Workers.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `crates/scraper` | `combi-scraper` (Rust): walks the site breadth-first from one or more IDs and stores what it finds |
 | `migrations/` | Database schema (`sqlx migrate`) |
-| `.sqlx/` | Offline query metadata, so the scraper builds without a running database |
 | `web/src` | The website: Vite, React, TypeScript, TanStack Query, d3 for the radial family tree |
-| `web/worker` | The API: a Cloudflare Worker (Hono + postgres.js) serving `/api/*`, reaching Postgres through Hyperdrive |
+| `web/worker` | The API: a Cloudflare Worker (Hono + postgres.js) serving `/api/*`, reaching Postgres through Hyperdrive. `crawl.ts` fetches and parses MGP pages |
 | `web/shared` | Types used by both the API and the website |
 
 ## Develop
@@ -32,15 +30,18 @@ docker compose up
 
 ### Fill the database
 
-The site is empty until something is crawled. To crawl Donald Knuth (ID 10416) and all of
-his descendants:
+The site is empty until something is crawled. Open any person, for example
+http://localhost:5173/m/10416 for Donald Knuth, and press **Crawl this page**. A crawl
+fetches that one MGP page and stores the person along with their advisors and students as
+listed there; those people get their own crawl button until their pages are crawled too.
+
+A page crawled in the last 14 days is not fetched again (`RECRAWL_AFTER_DAYS` in
+`web/shared/types.ts`), and neither is an ID MGP reported as missing. The same thing from a
+shell:
 
 ```sh
-docker compose run --rm dev cargo run -p combi-scraper -- --start 10416
+curl -X POST http://localhost:5173/api/mathematicians/10416/crawl
 ```
-
-`--start`/`--end` crawl a range of root IDs and `--concurrency` caps parallel downloads.
-Pages fetched successfully in the last 24 hours are skipped.
 
 ### Common tasks
 
@@ -48,12 +49,11 @@ Pages fetched successfully in the last 24 hours are skipped.
 |---|---|
 | API tests (needs `db` running) | `npm --prefix web test` |
 | Typecheck the site, the worker and the configs | `npm --prefix web run typecheck` |
-| Scraper tests | `docker compose run --rm dev cargo test --workspace` |
 | Add a migration | `docker compose run --rm dev sqlx migrate add -r <name>` |
-| Refresh `.sqlx/` after changing a scraper query | `docker compose run --rm dev cargo sqlx prepare --workspace` |
 
-The API tests create a throwaway database, apply every migration, load
-`web/worker/test/fixtures/family.sql` and drop the database afterwards. They connect as
+The API tests create throwaway databases with every migration applied, load
+`web/worker/test/fixtures/family.sql` into one of them and drop them afterwards. The crawler
+tests parse saved MGP pages from `web/worker/test/fixtures/mgp/` and never reach the real site. They connect as
 `TEST_DATABASE_URL`, falling back to `DATABASE_URL` and then the local dev database.
 
 ### Without Docker
@@ -77,13 +77,14 @@ To use a different database in development, set
 | `GET /api/search?q=&limit=` | People whose name matches, ignoring case and accents and tolerating typos. Words must appear in order; an all-digit query also matches the MGP ID |
 | `GET /api/mathematicians/{id}` | One person with their advisors, students and descendant count |
 | `GET /api/mathematicians/{id}/graph?up=&down=` | Their neighbourhood: `up` generations of advisors and `down` of students (0–6 each, capped at 1,500 people) |
+| `POST /api/mathematicians/{id}/crawl` | Fetches their MGP page into the database: `{"status": "crawled"}`, or `"fresh"` without fetching when it was crawled in the last 14 days. 404 when MGP has no such ID, 429 past the rate limit |
 | `GET /api/stats` | Counts for the whole database |
 | `GET /api/notable` | The 12 people with the most students on record |
 
 ## Deploy
 
 The site and API deploy together as one Worker; pushes to `main` deploy through the
-Cloudflare GitHub integration. Postgres is the `combi` Neon project (linked in the gitignored
+Cloudflare GitHub integration, which runs `npm run build` and `npx wrangler deploy` in `web/`. Postgres is the `combi` Neon project (linked in the gitignored
 `.neon`), reached through the `combi` Hyperdrive config whose ID is in `web/wrangler.jsonc`.
 Hyperdrive pools connections itself, so it uses Neon's direct (unpooled) endpoint.
 
@@ -97,5 +98,5 @@ Hyperdrive pools connections itself, so it uses Neon's direct (unpooled) endpoin
    npx wrangler hyperdrive update 36c14748c0aa49f3a88aaec5498dcdcc --connection-string="postgres://user:password@host:5432/db"
    ```
 3. Deploy: `npm run deploy`
-4. Crawl into the hosted database by pointing the scraper at it:
-   `DATABASE_URL=postgres://… cargo run -p combi-scraper -- --start 10416`
+4. Crawl from the live site. The deployed Worker allows each visitor 10 crawls a minute
+   (`CRAWL_LIMITER` in `web/wrangler.jsonc`).

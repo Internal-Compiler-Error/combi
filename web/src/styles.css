@@ -67,6 +67,13 @@ h1, h2 { text-wrap: balance; }
 .muted { color: var(--ink-3); }
 .small { font-size: 13px; }
 .error { color: var(--error); }
+.btn {
+  padding: 6px 12px; border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--accent); color: var(--accent-ink); font-size: 14px;
+}
+.btn:disabled { opacity: 0.6; cursor: default; }
+.crawl { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 12px 0 0; }
+.person-head .crawl { margin: 0; }
 .notice { background: var(--warn-bg); color: var(--warn-ink); padding: 8px 12px; border-radius: 6px; margin: 0; }
 .label { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); margin: 0; }
 

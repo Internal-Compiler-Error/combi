@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { ApiError, degreeLine, mgpUrl, useGraph, usePerson, type Graph } from "../api/client";
 import { RadialGraph } from "../components/RadialGraph";
 import { PersonList } from "../components/PersonList";
+import { CrawlButton } from "../components/CrawlButton";
 
 const MAX_DEPTH = 6;
 
@@ -111,6 +112,12 @@ export function PersonPage() {
             <dd>{p.descendant_count}</dd>
           </div>
         </dl>
+        {!p.last_crawled && (
+          <p className="notice small">
+            {p.name}’s own page hasn’t been crawled yet; this is only what their advisors’ and students’ pages say.
+          </p>
+        )}
+        <CrawlButton id={p.id} lastCrawled={p.last_crawled} label={p.last_crawled ? "Crawl again" : "Crawl their page"} />
         <a className="ext" href={mgpUrl(p.id)} target="_blank" rel="noreferrer">
           Open on Mathematics Genealogy Project ↗
         </a>
@@ -167,6 +174,7 @@ function Missing({ id }: { id?: number }) {
           "That isn’t a valid ID."
         )}
       </p>
+      {id !== undefined && <CrawlButton id={id} lastCrawled={null} label="Crawl this page" />}
     </main>
   );
 }
