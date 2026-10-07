@@ -10,7 +10,7 @@ and students.
 |---|---|
 | `crates/scraper` | `combi-scraper`: walks the site breadth-first from one or more IDs and stores what it finds |
 | `crates/server` | `combi-server`: JSON API under `/api`; in production it also serves the built web app |
-| `web/` | The website: Vite, React, TypeScript, TanStack Query, d3-dag for the lineage graph |
+| `web/` | The website: Vite, React, TypeScript, TanStack Query, d3 for the radial family tree |
 | `migrations/` | Database schema, shared by both crates (`sqlx migrate`) |
 | `.sqlx/` | Offline query metadata, so the crates build without a running database |
 

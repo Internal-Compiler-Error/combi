@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ApiError, degreeLine, mgpUrl, useGraph, usePerson } from "../api/client";
-import { LineageGraph } from "../components/LineageGraph";
+import { Link } from "react-router";
+import { ApiError, degreeLine, mgpUrl, useGraph, usePerson, type Graph } from "../api/client";
+import { RadialGraph } from "../components/RadialGraph";
 import { PersonList } from "../components/PersonList";
 
 const MAX_DEPTH = 6;
@@ -23,6 +24,31 @@ function Stepper({ label, value, onChange }: { label: string; value: number; onC
   );
 }
 
+/** Advisors above the focus, nearest generation first; the radial graph only shows the generations below. */
+function Ancestry({ graph, linkTo }: { graph: Graph; linkTo: (id: number) => string }) {
+  const rows = new Map<number, Graph["nodes"]>();
+  for (const n of graph.nodes) if (n.depth < 0) rows.set(n.depth, [...(rows.get(n.depth) ?? []), n]);
+  if (!rows.size) return null;
+  const depths = [...rows.keys()].sort((a, b) => b - a);
+  return (
+    <ol className="ancestry" aria-label="Advisor generations">
+      {depths.map((d) => (
+        <li key={d}>
+          <span className="ancestry-gen mono">{d === -1 ? "Advisors" : `${-d} up`}</span>
+          <span className="ancestry-people">
+            {rows.get(d)!.map((n) => (
+              <Link key={n.id} to={linkTo(n.id)}>
+                {n.name}
+                {n.year && <span className="muted mono small"> {n.year}</span>}
+              </Link>
+            ))}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 const depthParam = (raw: string | null, fallback: number) => {
   const n = Number(raw ?? fallback);
   return Number.isInteger(n) ? Math.min(MAX_DEPTH, Math.max(0, n)) : fallback;
@@ -34,7 +60,7 @@ export function PersonPage() {
   const navigate = useNavigate();
   // generations shown live in the URL so a view can be shared and survives reloads
   const up = depthParam(params.get("up"), 2);
-  const down = depthParam(params.get("down"), 2);
+  const down = depthParam(params.get("down"), 3);
 
   const person = usePerson(id);
   const graph = useGraph(id, { up, down });
@@ -51,14 +77,15 @@ export function PersonPage() {
   };
 
   // keep the chosen depths when moving to another person
-  const open = (to: number) => navigate(`/m/${to}?${new URLSearchParams({ up: String(up), down: String(down) })}`);
+  const linkTo = (to: number) => `/m/${to}?${new URLSearchParams({ up: String(up), down: String(down) })}`;
+  const open = (to: number) => navigate(linkTo(to));
 
   if (!Number.isInteger(id)) return <Missing />;
   if (person.isError) return person.error instanceof ApiError && person.error.status === 404 ? <Missing id={id} /> : <main className="page"><p className="error">{person.error.message}</p></main>;
   if (!p) return <main className="page"><p className="muted">Loading…</p></main>;
 
   const g = graph.data;
-  const alone = g && g.nodes.length <= 1;
+  const alone = g && !g.nodes.some((n) => n.depth > 0);
 
   return (
     <main className="person">
@@ -95,14 +122,17 @@ export function PersonPage() {
           <Stepper label="Student generations" value={down} onChange={(v) => setDepth("down", v)} />
           <span className="muted small graph-hint">{graph.isFetching ? "Loading…" : g ? `${g.nodes.length} people · click anyone to recentre` : ""}</span>
         </div>
+        {g && <Ancestry graph={g} linkTo={linkTo} />}
         {g?.truncated && <p className="notice small">This view is capped at {g.nodes.length} people; the farthest generations are cut off. Lower the generations to see a complete picture.</p>}
         {graph.isError && <p className="error">{graph.error.message}</p>}
         {alone ? (
           <div className="graph graph-empty">
-            <p className="muted">No advisors or students of {p.name} are in the database yet.</p>
+            <p className="muted">
+              {down === 0 ? "Add a student generation to see the tree." : `No students of ${p.name} are in the database yet.`}
+            </p>
           </div>
         ) : (
-          g && <LineageGraph graph={g} onOpen={open} />
+          g && <RadialGraph graph={g} onOpen={open} />
         )}
       </section>
 
