@@ -15,7 +15,7 @@ export function CrawlButton({ id, lastCrawled, label, compact = false }: { id: n
     : null;
   return (
     <div className={compact ? "crawl crawl-compact" : "crawl"}>
-      <button type="button" className="btn" onClick={() => crawl.mutate()} disabled={fresh || crawl.isPending} title={compact ? (status ?? undefined) : undefined}>
+      <button type="button" className="btn" onClick={() => crawl.mutate()} disabled={fresh || crawl.isPending} aria-busy={crawl.isPending} title={compact ? (status ?? undefined) : undefined}>
         {crawl.isPending ? "Crawling…" : label}
       </button>
       {status && !compact && <span className="muted small">{status}</span>}

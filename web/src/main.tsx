@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router";
@@ -8,6 +8,9 @@ import { PersonPage } from "./pages/PersonPage";
 import { SearchPage } from "./pages/SearchPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import "./styles.css";
+
+// the map brings d3-geo and the world's outlines, so it loads only when someone opens it
+const MapPage = lazy(() => import("./pages/MapPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,6 +30,14 @@ createRoot(document.getElementById("root")!).render(
             <Route index element={<HomePage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="m/:id" element={<PersonPage />} />
+            <Route
+              path="map"
+              element={
+                <Suspense fallback={<main className="page" />}>
+                  <MapPage />
+                </Suspense>
+              }
+            />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

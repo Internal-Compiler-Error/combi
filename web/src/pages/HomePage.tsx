@@ -2,8 +2,7 @@ import { useEffect } from "react";
 import { Link } from "react-router";
 import { degreeLine, useNotable, useStats } from "../api/client";
 import { SearchBox } from "../components/SearchBox";
-
-const fmt = new Intl.NumberFormat();
+import { CountUp, rise } from "../motion";
 
 export function HomePage() {
   const stats = useStats();
@@ -22,24 +21,32 @@ export function HomePage() {
         <SearchBox large autoFocus />
         {s && (
           <dl className="facts">
-            <div>
+            <div className="rise" style={rise(0)}>
               <dt>Mathematicians</dt>
-              <dd>{fmt.format(s.mathematicians)}</dd>
+              <dd>
+                <CountUp value={s.mathematicians} />
+              </dd>
             </div>
-            <div>
+            <div className="rise" style={rise(1)}>
               <dt>Advisor links</dt>
-              <dd>{fmt.format(s.relations)}</dd>
+              <dd>
+                <CountUp value={s.relations} />
+              </dd>
             </div>
-            <div>
+            <div className="rise" style={rise(2)}>
               <dt>Degrees</dt>
               <dd>{s.first_year && s.last_year ? `${s.first_year}–${s.last_year}` : "—"}</dd>
             </div>
-            <div>
-              <dt>Countries</dt>
-              <dd>{s.countries}</dd>
+            <div className="rise" style={rise(3)}>
+              <dt>
+                <Link to="/map">Countries</Link>
+              </dt>
+              <dd>
+                <CountUp value={s.countries} />
+              </dd>
             </div>
             {s.last_scraped && (
-              <div>
+              <div className="rise" style={rise(4)}>
                 <dt>Last crawled</dt>
                 <dd>{new Date(s.last_scraped).toLocaleDateString(undefined, { dateStyle: "medium" })}</dd>
               </div>
@@ -53,8 +60,8 @@ export function HomePage() {
         <section className="notable">
           <h2 className="label">Most students on record</h2>
           <ul className="notable-grid">
-            {notable.data.map((p) => (
-              <li key={p.id}>
+            {notable.data.map((p, i) => (
+              <li key={p.id} className="rise" style={rise(i)}>
                 <Link to={`/m/${p.id}`} className="notable-card">
                   <span className="notable-name">{p.name}</span>
                   <span className="muted small">{degreeLine(p)}</span>

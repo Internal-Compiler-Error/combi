@@ -72,6 +72,18 @@ export type MgpHit = {
   last_crawled: string | null;
 };
 
+/** Mathematicians by the country of the school they graduated from. */
+export type CountryStat = {
+  /** MGP's name for the country, as in its flag images ("UnitedStates"); the key for /countries/{country}/schools */
+  country: string;
+  /** the same, spelled for people ("United States") */
+  name: string;
+  mathematicians: number;
+  schools: number;
+};
+
+export type SchoolStat = { school: string; mathematicians: number };
+
 export type ApiErrorBody = { error: string };
 
 export const MAX_GRAPH_DEPTH = 6;

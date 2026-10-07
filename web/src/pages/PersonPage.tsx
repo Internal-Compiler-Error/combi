@@ -5,6 +5,7 @@ import { ApiError, degreeLine, mgpUrl, useGraph, usePerson, type Graph } from ".
 import { RadialGraph } from "../components/RadialGraph";
 import { PersonList } from "../components/PersonList";
 import { CrawlButton } from "../components/CrawlButton";
+import { CountUp } from "../motion";
 
 const MAX_DEPTH = 6;
 
@@ -101,15 +102,21 @@ export function PersonPage() {
         <dl className="counts">
           <div>
             <dt>Advisors</dt>
-            <dd>{p.advisors.length}</dd>
+            <dd>
+              <CountUp value={p.advisors.length} />
+            </dd>
           </div>
           <div>
             <dt>Students</dt>
-            <dd>{p.student_count}</dd>
+            <dd>
+              <CountUp value={p.student_count} />
+            </dd>
           </div>
           <div>
             <dt>Descendants</dt>
-            <dd>{p.descendant_count}</dd>
+            <dd>
+              <CountUp value={p.descendant_count} />
+            </dd>
           </div>
         </dl>
         {!p.last_crawled && (

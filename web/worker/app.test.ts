@@ -1,5 +1,5 @@
 import { describe, expect, inject, test } from "vitest";
-import type { Graph, Person, PersonDetail, Stats } from "../shared/types";
+import type { CountryStat, Graph, Person, PersonDetail, SchoolStat, Stats } from "../shared/types";
 import { createApp, normalizeQuery, prettyCountry } from "./app";
 
 // The database holds tests/fixtures/family.sql: a small slice of a real lineage with one
@@ -66,6 +66,19 @@ test("notable ranks by student count", async () => {
   const n = await json<Person[]>("/notable");
   expect(n).toHaveLength(5);
   expect(n.every((p) => p.student_count === 1)).toBe(true);
+});
+
+test("countries count mathematicians by their school's country", async () => {
+  expect(await json<CountryStat[]>("/countries")).toEqual([
+    { country: "Germany", name: "Germany", mathematicians: 5, schools: 3 },
+    { country: "Austria", name: "Austria", mathematicians: 1, schools: 1 },
+  ]);
+  expect(await json<SchoolStat[]>("/countries/Germany/schools")).toEqual([
+    { school: "Universität Bonn", mathematicians: 2 },
+    { school: "Universität Helmstedt", mathematicians: 2 },
+    { school: "Universität Marburg", mathematicians: 1 },
+  ]);
+  expect(await json<SchoolStat[]>("/countries/Atlantis/schools")).toEqual([]);
 });
 
 test("helpers", () => {

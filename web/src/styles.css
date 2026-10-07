@@ -19,6 +19,13 @@
   --c2: #eb6834;
   --c3: #1baf7a;
   --c-other: #8a909c;
+  /* sequential blue for the map, light to dark = few to many; validated as an ordinal ramp */
+  --seq-1: #86b6ef;
+  --seq-2: #5598e7;
+  --seq-3: #2a78d6;
+  --seq-4: #1c5cab;
+  --seq-5: #0d366b;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --font-display: "STIX Two Text", "Times New Roman", Georgia, serif;
   --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -44,6 +51,12 @@
     --c2: #d95926;
     --c3: #199e70;
     --c-other: #7c828c;
+    /* on dark, few recedes into the surface and many is brightest */
+    --seq-1: #184f95;
+    --seq-2: #256abf;
+    --seq-3: #3987e5;
+    --seq-4: #6da7ec;
+    --seq-5: #b7d3f6;
     color-scheme: dark;
   }
 }
@@ -92,6 +105,10 @@ h1, h2 { text-wrap: balance; }
 .wordmark-name { font-family: var(--font-display); font-weight: 600; font-size: 22px; }
 .wordmark-sub { font-size: 12px; color: var(--ink-3); letter-spacing: 0.04em; }
 .topbar-search { margin-left: auto; width: min(420px, 100%); }
+.topnav { display: flex; gap: 16px; font-size: 14px; }
+.topnav a { color: var(--ink-2); text-decoration: none; padding: 4px 0; border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.2s var(--ease-out); }
+.topnav a:hover { color: var(--ink); }
+.topnav a.active { color: var(--ink); border-color: var(--accent); }
 
 /* ---------- search ---------- */
 .search { position: relative; }
@@ -129,7 +146,8 @@ h1, h2 { text-wrap: balance; }
   height: 100%; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; text-decoration: none;
   background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
 }
-.notable-card:hover { border-color: var(--accent); }
+.notable-card { transition: border-color 0.2s, transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out); }
+.notable-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 20px rgb(0 0 0 / 0.08); }
 .notable-name { font-family: var(--font-display); font-weight: 600; font-size: 17px; line-height: 1.25; }
 .notable-count { margin-top: 6px; font-size: 13px; color: var(--ink-2); }
 .notable-count b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
@@ -235,4 +253,92 @@ svg[data-tier="0"] .tier-1:not(.force), svg[data-tier="0"] .tier-2:not(.force), 
   .person, .page, .home { padding-inline: 16px; }
   .home { padding-block: 32px; }
 }
+/* ---------- map ---------- */
+.mappage { width: min(1280px, 100%); margin: 0 auto; padding-inline: 24px; padding-block: 32px 48px; display: flex; flex-direction: column; gap: 20px; }
+.mappage header p { margin: 0; max-width: 70ch; }
+.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+.map-card { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.map { position: relative; }
+.map svg { display: block; width: 100%; height: auto; }
+.map-loading { aspect-ratio: 2 / 1; border-radius: 6px; background: var(--rule-soft); animation: breathe 1.6s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: 0.5; } }
+.map-country { fill: var(--rule-soft); stroke: var(--surface); stroke-width: 0.6; stroke-linejoin: round; }
+.map-country.has-data { cursor: pointer; transition: fill 0.7s var(--ease-out), opacity 0.2s; transition-delay: calc(var(--i, 0) * 14ms); }
+.map-ready .map-country.has-data { fill: var(--shade); }
+.map-country.has-data:hover { opacity: 0.85; transition-delay: 0s; }
+.map-outline { fill: none; stroke: var(--ink-2); stroke-width: 1; pointer-events: none; stroke-linejoin: round; }
+.map-outline-selected { stroke: var(--ink); stroke-width: 1.75; }
+.map-dot { fill: var(--rule-soft); stroke: var(--surface); stroke-width: 1.5; cursor: pointer; transition: fill 0.7s var(--ease-out), r 0.2s var(--ease-out); transition-delay: calc(var(--i, 0) * 14ms), 0s; }
+.map-ready .map-dot { fill: var(--shade); }
+.map-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 8px; font-size: 12px; color: var(--ink-2); }
+.map-legend-title { color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; }
+.map-legend-item { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.map-legend-item i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.map-legend-empty { background: var(--rule-soft); box-shadow: inset 0 0 0 1px var(--rule); }
+.map-side { display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 120px); overflow: auto; padding-right: 4px; }
+.bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.bars button, .bar-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px;
+  background: none; text-align: left; font-size: 14px; color: var(--ink);
+}
+.bars button { transition: background-color 0.15s; }
+.bars button:hover { background: var(--accent-soft); }
+.bar-name { min-width: 0; overflow-wrap: anywhere; }
+.bar-value { color: var(--ink-2); font-size: 13px; }
+.bar {
+  grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--accent); width: calc(var(--w) * 100%); min-width: 2px;
+  transform-origin: left; animation: grow-x 0.6s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 32ms + 80ms);
+}
+@keyframes grow-x { from { transform: scaleX(0); } }
+.back { align-self: flex-start; border: 0; background: none; padding: 4px 0; color: var(--accent); font-size: 13px; }
+.back:hover { text-decoration: underline; }
+.country { display: flex; flex-direction: column; gap: 10px; animation: rise 0.36s var(--ease-out) backwards; }
+.country-name { font-family: var(--font-display); font-weight: 600; font-size: 26px; line-height: 1.15; margin: 0; }
+.country .counts { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 900px) {
+  .mappage { padding-inline: 16px; }
+  .map-layout { grid-template-columns: minmax(0, 1fr); }
+  .map-side { max-height: none; overflow: visible; }
+}
+
+/* ---------- motion ----------
+   Things settle into place: short, one easing curve, a few pixels of travel, never a bounce.
+   Entrances use `backwards` fill so nothing keeps a transform once it has arrived. */
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: scale(0.3); } }
+@keyframes drop { from { opacity: 0; transform: translateY(-4px) scale(0.985); } }
+@keyframes draw { from { stroke-dashoffset: 1; } }
+@keyframes working { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+
+.route { flex: 1; display: flex; flex-direction: column; min-width: 0; animation: rise 0.36s var(--ease-out) backwards; }
+.route > * { flex: 1; }
+/* a list's items arrive one after another; --i comes from rise() in motion.tsx */
+.rise { animation: rise 0.42s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 32ms); }
+
+.btn { transition: transform 0.15s var(--ease-out), box-shadow 0.2s var(--ease-out), opacity 0.2s; }
+.btn:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); }
+.btn:not(:disabled):active { transform: none; box-shadow: none; transition-duration: 0.05s; }
+.btn[aria-busy="true"] {
+  opacity: 1;
+  background-image: linear-gradient(100deg, transparent 35%, rgb(255 255 255 / 0.28) 50%, transparent 65%);
+  background-size: 200% 100%; animation: working 1.2s linear infinite;
+}
+.stepper button, .graph-zoom button { transition: background-color 0.15s, border-color 0.15s; }
+.stepper button:not(:disabled):hover, .graph-zoom button:hover { background: var(--accent-soft); border-color: var(--accent); }
+.suggestions { animation: drop 0.16s var(--ease-out); transform-origin: top center; }
+.suggestions button { transition: background-color 0.12s; }
+.tip { animation: fade 0.12s ease-out; }
+.results tbody tr, .people li { transition: background-color 0.15s; }
+.results tbody tr:hover, .people li:hover { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+.counts dd, .facts dd { transition: color 0.3s; }
+
+/* the radial tree grows outward a generation at a time when it is first drawn for someone */
+.dot, .link, .n-label { transition: opacity 0.2s var(--ease-out), stroke 0.2s, stroke-width 0.2s; }
+.grow .dot { transform-box: fill-box; transform-origin: center; animation: pop 0.5s var(--ease-out) backwards; animation-delay: calc(var(--gen) * 110ms); }
+.grow .link-primary { stroke-dasharray: 1; animation: draw 0.55s var(--ease-out) backwards; animation-delay: calc(var(--gen) * 110ms - 80ms); }
+.grow .link-second { animation: fade 0.5s ease-out backwards; animation-delay: calc(var(--gen) * 110ms + 150ms); }
+.grow .ring, .grow .ring-label { animation: fade 0.5s ease-out backwards; animation-delay: calc(var(--gen) * 110ms); }
+.grow .n-label { animation: fade 0.4s ease-out backwards; animation-delay: calc(var(--gen) * 110ms + 220ms); }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

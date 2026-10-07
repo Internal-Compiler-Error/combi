@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useMgpSearch, useSearch, type Person } from "../api/client";
 import { CrawlButton } from "../components/CrawlButton";
+import { rise } from "../motion";
 
 export function SearchPage() {
   const [params] = useSearchParams();
@@ -41,8 +42,8 @@ function Results({ people }: { people: Person[] }) {
         </tr>
       </thead>
       <tbody>
-        {people.map((p) => (
-          <tr key={p.id}>
+        {people.map((p, i) => (
+          <tr key={p.id} className="rise" style={rise(i)}>
             <td>
               <Link to={`/m/${p.id}`}>{p.name}</Link>
             </td>
@@ -107,8 +108,8 @@ function MgpResults({ q, auto }: { q: string; auto: boolean }) {
                 </tr>
               </thead>
               <tbody>
-                {mgp.data.map((h) => (
-                  <tr key={h.id}>
+                {mgp.data.map((h, i) => (
+                  <tr key={h.id} className="rise" style={rise(i)}>
                     <td>
                       <Link to={`/m/${h.id}`}>{h.name}</Link>
                       {!h.known && <span className="muted small"> · not in the database</span>}

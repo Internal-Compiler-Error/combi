@@ -9,7 +9,7 @@ demand from the site itself. It runs on Cloudflare Workers.
 | Path | What it is |
 |---|---|
 | `migrations/` | Database schema (`sqlx migrate`) |
-| `web/src` | The website: Vite, React, TypeScript, TanStack Query, d3 for the radial family tree |
+| `web/src` | The website: Vite, React, TypeScript, TanStack Query, d3 for the radial family tree and the world map (`/map`, Natural Earth outlines from `world-atlas`) |
 | `web/worker` | The API: a Cloudflare Worker (Hono + postgres.js) serving `/api/*`, reaching Postgres through Hyperdrive. `crawl.ts` fetches and parses MGP pages |
 | `web/shared` | Types used by both the API and the website |
 
@@ -81,6 +81,8 @@ To use a different database in development, set
 | `GET /api/mathematicians/{id}/graph?up=&down=` | Their neighbourhood: `up` generations of advisors and `down` of students (0–6 each, capped at 1,500 people) |
 | `POST /api/mathematicians/{id}/crawl` | Fetches their MGP page into the database: `{"status": "crawled"}`, or `"fresh"` without fetching when it was crawled in the last 14 days. 404 when MGP has no such ID, 429 past the rate limit |
 | `GET /api/mgp/search?q=` | MGP's own search, marking who is already in the database. One word is a family name; with more, the first is the given name and the last the family name. Shares the crawl rate limit |
+| `GET /api/countries` | Mathematicians and schools per country, by where the degree was awarded |
+| `GET /api/countries/{country}/schools` | That country's schools with their mathematician counts; `country` is MGP's name, e.g. `UnitedStates` |
 | `GET /api/stats` | Counts for the whole database |
 | `GET /api/notable` | The 12 people with the most students on record |
 

@@ -13,8 +13,11 @@ const RING = 120;
 const SLOTS = ["var(--c1)", "var(--c2)", "var(--c3)"] as const;
 
 type Pos = { a: number; r: number; x: number; y: number };
-type Link = { advisor: number; student: number; d: string; primary: boolean };
-type Placed = { node: GraphNode; pos: Pos; desc: number; radius: number; color: string | null; labelTier: 0 | 1 | 2 };
+type Link = { advisor: number; student: number; d: string; primary: boolean; gen: number };
+type Placed = { node: GraphNode; pos: Pos; desc: number; radius: number; color: string | null; labelTier: 0 | 1 | 2; gen: number };
+
+/** Generation from the focus, which staggers the growing animation (see .grow in styles.css). */
+const gen = (g: number) => ({ "--gen": g }) as React.CSSProperties;
 
 function shortName(name: string) {
   const p = name.split(/\s+/);
@@ -70,9 +73,11 @@ function layout(graph: Graph) {
     .separation((a, b) => (a.parent === b.parent ? 1 : 1.6) / Math.max(1, a.depth))(root);
 
   const pos = new Map<number, Pos>();
-  laid.each((d: HierarchyPointNode<GraphNode>) =>
-    pos.set(d.data.id, { a: d.x, r: d.y, x: d.y * Math.cos(d.x - Math.PI / 2), y: d.y * Math.sin(d.x - Math.PI / 2) }),
-  );
+  const gen = new Map<number, number>();
+  laid.each((d: HierarchyPointNode<GraphNode>) => {
+    pos.set(d.data.id, { a: d.x, r: d.y, x: d.y * Math.cos(d.x - Math.PI / 2), y: d.y * Math.sin(d.x - Math.PI / 2) });
+    gen.set(d.data.id, d.depth);
+  });
 
   // colour the three most common countries in this view; legend says which is which
   const counts = new Map<string, number>();
@@ -86,7 +91,7 @@ function layout(graph: Graph) {
     const d = desc(n.id).size;
     // tier 0 is always labelled, 1 from moderate zoom, 2 only when zoomed in close
     const labelTier = n.id === graph.focus || d >= 8 ? 0 : d >= 3 ? 1 : 2;
-    return { node: n, pos: pos.get(n.id)!, desc: d, radius: radius(d), color: colorOf(n.country), labelTier };
+    return { node: n, pos: pos.get(n.id)!, desc: d, radius: radius(d), color: colorOf(n.country), labelTier, gen: gen.get(n.id)! };
   });
 
   const radial = linkRadial<{ source: Pos; target: Pos }, Pos>()
@@ -103,7 +108,7 @@ function layout(graph: Graph) {
       const d = primary
         ? (radial({ source: s, target: t }) ?? "")
         : `M${s.x},${s.y}Q${((s.x + t.x) / 2) * 0.55},${((s.y + t.y) / 2) * 0.55} ${t.x},${t.y}`;
-      links.push({ advisor, student, d, primary });
+      links.push({ advisor, student, d, primary, gen: gen.get(student)! });
     }
 
   const lineage = (id: number) => {
@@ -184,84 +189,98 @@ export function RadialGraph({ graph, onOpen }: { graph: Graph; onOpen: (id: numb
     <div className="graph" ref={wrapRef}>
       <svg ref={svgRef} role="group" aria-label="Descendants arranged in rings, one ring per generation" data-tier="0">
         <g ref={viewRef}>
-          <g className="rings">
-            {Array.from({ length: L.maxGen }, (_, i) => (
-              <g key={i}>
-                <circle className="ring" r={(i + 1) * RING} />
-                <text className="ring-label" x={4} y={-(i + 1) * RING - 4}>
-                  Gen {i + 1}
-                </text>
-              </g>
-            ))}
-          </g>
-          <g>
-            {L.links.map((l) => {
-              const on = lit && lit.has(l.advisor) && lit.has(l.student);
-              return <path key={`${l.advisor}-${l.student}`} d={l.d} className={`link ${l.primary ? "" : "link-second"} ${lit ? (on ? "is-lit" : "is-dim") : ""}`} />;
-            })}
-          </g>
-          <g>
-            {L.placed.map(({ node, pos, radius, color }) => {
-              const focus = node.id === graph.focus;
-              return (
+          {/* keyed by focus: a new person regrows the tree from the centre; more or fewer
+              generations of the same person only add or drop rings */}
+          <g className="grow" key={graph.focus}>
+            <g className="rings">
+              {Array.from({ length: L.maxGen }, (_, i) => (
+                <g key={i} style={gen(i + 1)}>
+                  <circle className="ring" r={(i + 1) * RING} />
+                  <text className="ring-label" x={4} y={-(i + 1) * RING - 4}>
+                    Gen {i + 1}
+                  </text>
+                </g>
+              ))}
+            </g>
+            <g>
+              {L.links.map((l) => {
+                const on = lit && lit.has(l.advisor) && lit.has(l.student);
+                return (
+                  <path
+                    key={`${l.advisor}-${l.student}`}
+                    d={l.d}
+                    // a unit length lets the growing animation draw primary links with one dash
+                    pathLength={l.primary ? 1 : undefined}
+                    style={gen(l.gen)}
+                    className={`link ${l.primary ? "link-primary" : "link-second"} ${lit ? (on ? "is-lit" : "is-dim") : ""}`}
+                  />
+                );
+              })}
+            </g>
+            <g>
+              {L.placed.map(({ node, pos, radius, color, gen: g }) => {
+                const focus = node.id === graph.focus;
+                return (
+                  <circle
+                    key={node.id}
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={radius}
+                    className={`dot ${color ? "" : "dot-other"} ${focus ? "dot-focus" : ""} ${lit && !lit.has(node.id) ? "is-dim" : ""}`}
+                    style={{ ...gen(g), ...(color ? { fill: color } : {}) }}
+                  />
+                );
+              })}
+            </g>
+            <g>
+              {L.placed.map(({ node, pos, radius, labelTier, gen: g }) => {
+                const focus = node.id === graph.focus;
+                const shown = named?.has(node.id) ?? false;
+                if (focus)
+                  return (
+                    <text key={node.id} className="n-label n-label-focus" textAnchor="middle" y={radius + 16} dy="0.32em" style={gen(0)}>
+                      {shortName(node.name)}
+                    </text>
+                  );
+                const deg = (pos.a * 180) / Math.PI - 90;
+                const flip = pos.a > Math.PI;
+                const off = radius + 4;
+                return (
+                  <text
+                    key={node.id}
+                    className={`n-label tier-${labelTier} ${shown ? "force" : ""} ${lit && !lit.has(node.id) ? "is-dim" : ""}`}
+                    textAnchor={flip ? "end" : "start"}
+                    dx={flip ? -off : off}
+                    dy="0.32em"
+                    style={gen(g)}
+                    transform={`translate(${pos.x},${pos.y}) rotate(${flip ? deg + 180 : deg})`}
+                  >
+                    {shortName(node.name)}
+                  </text>
+                );
+              })}
+            </g>
+            <g>
+              {L.placed.map(({ node, pos, radius }) => (
                 <circle
                   key={node.id}
                   cx={pos.x}
                   cy={pos.y}
-                  r={radius}
-                  className={`dot ${color ? "" : "dot-other"} ${focus ? "dot-focus" : ""} ${lit && !lit.has(node.id) ? "is-dim" : ""}`}
-                  style={color ? { fill: color } : undefined}
+                  r={Math.max(10, radius + 4)}
+                  className="hit"
+                  role="link"
+                  tabIndex={0}
+                  aria-label={`${node.name}${node.year ? `, ${node.year}` : ""}`}
+                  onPointerEnter={track(node.id)}
+                  onPointerMove={track(node.id)}
+                  onPointerLeave={() => setHover(null)}
+                  onFocus={() => setHover({ id: node.id, x: 16, y: 16 })}
+                  onBlur={() => setHover(null)}
+                  onClick={() => onOpen(node.id)}
+                  onKeyDown={(e) => e.key === "Enter" && onOpen(node.id)}
                 />
-              );
-            })}
-          </g>
-          <g>
-            {L.placed.map(({ node, pos, radius, labelTier }) => {
-              const focus = node.id === graph.focus;
-              const shown = named?.has(node.id) ?? false;
-              if (focus)
-                return (
-                  <text key={node.id} className="n-label n-label-focus" textAnchor="middle" y={radius + 16} dy="0.32em">
-                    {shortName(node.name)}
-                  </text>
-                );
-              const deg = (pos.a * 180) / Math.PI - 90;
-              const flip = pos.a > Math.PI;
-              const off = radius + 4;
-              return (
-                <text
-                  key={node.id}
-                  className={`n-label tier-${labelTier} ${shown ? "force" : ""} ${lit && !lit.has(node.id) ? "is-dim" : ""}`}
-                  textAnchor={flip ? "end" : "start"}
-                  dx={flip ? -off : off}
-                  dy="0.32em"
-                  transform={`translate(${pos.x},${pos.y}) rotate(${flip ? deg + 180 : deg})`}
-                >
-                  {shortName(node.name)}
-                </text>
-              );
-            })}
-          </g>
-          <g>
-            {L.placed.map(({ node, pos, radius }) => (
-              <circle
-                key={node.id}
-                cx={pos.x}
-                cy={pos.y}
-                r={Math.max(10, radius + 4)}
-                className="hit"
-                role="link"
-                tabIndex={0}
-                aria-label={`${node.name}${node.year ? `, ${node.year}` : ""}`}
-                onPointerEnter={track(node.id)}
-                onPointerMove={track(node.id)}
-                onPointerLeave={() => setHover(null)}
-                onFocus={() => setHover({ id: node.id, x: 16, y: 16 })}
-                onBlur={() => setHover(null)}
-                onClick={() => onOpen(node.id)}
-                onKeyDown={(e) => e.key === "Enter" && onOpen(node.id)}
-              />
-            ))}
+              ))}
+            </g>
           </g>
         </g>
       </svg>

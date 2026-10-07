@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ApiErrorBody, CrawlResult, Graph, GraphParams, MgpHit, Person, PersonDetail, Stats } from "../../shared/types";
+import type { ApiErrorBody, CountryStat, CrawlResult, Graph, GraphParams, MgpHit, Person, PersonDetail, SchoolStat, Stats } from "../../shared/types";
 
-export type { CrawlResult, Graph, GraphNode, GraphLink, MgpHit, Person, PersonDetail, Stats } from "../../shared/types";
+export type { CountryStat, CrawlResult, Graph, GraphNode, GraphLink, MgpHit, Person, PersonDetail, SchoolStat, Stats } from "../../shared/types";
 export { mgpUrl, RECRAWL_AFTER_DAYS } from "../../shared/types";
 
 export class ApiError extends Error {
@@ -42,6 +42,15 @@ export const useSearch = (q: string, limit = 8) =>
  * every search is a request to MGP. */
 export const useMgpSearch = (q: string, enabled: boolean) =>
   useQuery({ queryKey: ["mgp-search", q], queryFn: () => get<MgpHit[]>("/mgp/search", { q }), enabled: enabled && q.trim().length > 0 });
+
+export const useCountries = () => useQuery({ queryKey: ["countries"], queryFn: () => get<CountryStat[]>("/countries") });
+
+export const useCountrySchools = (country: string | null) =>
+  useQuery({
+    queryKey: ["country-schools", country],
+    queryFn: () => get<SchoolStat[]>(`/countries/${encodeURIComponent(country!)}/schools`),
+    enabled: country !== null,
+  });
 
 export const usePerson = (id: number) =>
   useQuery({ queryKey: ["person", id], queryFn: () => get<PersonDetail>(`/mathematicians/${id}`) });

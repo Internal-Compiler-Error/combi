@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import postgres from "postgres";
-import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, type ApiErrorBody, type CrawlResult, type Graph, type MgpHit, type GraphLink, type Person, type PersonDetail, type Stats } from "../shared/types";
+import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, type ApiErrorBody, type CountryStat, type CrawlResult, type Graph, type MgpHit, type SchoolStat, type GraphLink, type Person, type PersonDetail, type Stats } from "../shared/types";
 import { crawl, fetchMgpPage, fetchMgpSearch, mgpQuery, MgpNotFound, parseSearchResults, UpstreamError, type FetchPage, type FetchSearch } from "./crawl";
 
 type Sql = postgres.Sql;
@@ -241,6 +241,26 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
              (select max(graduating_year) from mathematicians) as last_year,
              (select max(date) from scrape_logs where result = 'success') as last_scraped`;
     return c.json<Stats>({ ...s, last_scraped: s.last_scraped ? new Date(s.last_scraped).toISOString() : null });
+  });
+
+  app.get("/countries", async (c) => {
+    const rows = await c.var.sql<Omit<CountryStat, "name">[]>`
+      select l.country, count(distinct m.id)::int as mathematicians, count(distinct l.school)::int as schools
+      from school_locations l join mathematicians m on m.school = l.school
+      group by l.country
+      order by mathematicians desc, l.country`;
+    return c.json<CountryStat[]>(rows.map((r) => ({ ...r, name: prettyCountry(r.country) })));
+  });
+
+  app.get("/countries/:country/schools", async (c) => {
+    const rows = await c.var.sql<SchoolStat[]>`
+      select l.school, count(*)::int as mathematicians
+      from school_locations l join mathematicians m on m.school = l.school
+      where l.country = ${c.req.param("country")}
+      group by l.school
+      order by mathematicians desc, l.school
+      limit 500`;
+    return c.json<SchoolStat[]>(rows);
   });
 
   /** The advisors with the most students on record, as starting points for browsing. */
