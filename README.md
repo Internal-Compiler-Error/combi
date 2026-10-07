@@ -82,15 +82,19 @@ To use a different database in development, set
 
 ## Deploy
 
-The site and API deploy together as one Worker. Postgres has to be hosted somewhere the
-Worker can reach (for example Neon or Supabase) and must allow the `unaccent` and `pg_trgm`
-extensions.
+The site and API deploy together as one Worker; pushes to `main` deploy through the
+Cloudflare GitHub integration. Postgres is the `combi` Neon project (linked in the gitignored
+`.neon`), reached through the `combi` Hyperdrive config whose ID is in `web/wrangler.jsonc`.
+Hyperdrive pools connections itself, so it uses Neon's direct (unpooled) endpoint.
 
-1. Apply the migrations to the hosted database: `DATABASE_URL=postgres://… sqlx migrate run`
-2. Create a Hyperdrive config for it, and paste the ID it prints into `web/wrangler.jsonc`:
+1. Apply the migrations to Neon. `neon connection-string` prints the direct URL:
+   ```sh
+   DATABASE_URL="$(neon connection-string)" docker compose run --rm --no-deps -e DATABASE_URL dev sqlx migrate run
+   ```
+2. If the Neon password or endpoint changes, repoint Hyperdrive (the ID stays the same):
    ```sh
    cd web
-   npx wrangler hyperdrive create combi --connection-string="postgres://user:password@host:5432/db"
+   npx wrangler hyperdrive update 36c14748c0aa49f3a88aaec5498dcdcc --connection-string="postgres://user:password@host:5432/db"
    ```
 3. Deploy: `npm run deploy`
 4. Crawl into the hosted database by pointing the scraper at it:
