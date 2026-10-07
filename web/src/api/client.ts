@@ -1,8 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ApiErrorBody, CountryStat, CrawlResult, Graph, GraphParams, MgpHit, Person, PersonDetail, SchoolStat, Stats } from "../../shared/types";
+import type { ApiErrorBody, CountryStat, CrawlResult, Graph, GraphParams, MgpHit, Person, PersonDetail, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../../shared/types";
 
-export type { CountryStat, CrawlResult, Graph, GraphNode, GraphLink, MgpHit, Person, PersonDetail, SchoolStat, Stats } from "../../shared/types";
-export { mgpUrl, RECRAWL_AFTER_DAYS } from "../../shared/types";
+export type { CountryStat, CrawlResult, Graph, GraphNode, GraphLink, MgpHit, Person, PersonDetail, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../../shared/types";
+export { MAX_SCHOOL_PEOPLE, mgpUrl, RECRAWL_AFTER_DAYS } from "../../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -50,6 +50,16 @@ export const useCountrySchools = (country: string | null) =>
     queryKey: ["country-schools", country],
     queryFn: () => get<SchoolStat[]>(`/countries/${encodeURIComponent(country!)}/schools`),
     enabled: country !== null,
+  });
+
+export const useSchool = (id: number) => useQuery({ queryKey: ["school", id], queryFn: () => get<SchoolDetail>(`/schools/${id}`) });
+
+export const useSchoolSearch = (q: string, limit = 8) =>
+  useQuery({
+    queryKey: ["school-search", q, limit],
+    queryFn: () => get<SchoolHit[]>("/schools/search", { q, limit }),
+    enabled: q.trim().length > 0,
+    placeholderData: keepPreviousData,
   });
 
 export const usePerson = (id: number) =>

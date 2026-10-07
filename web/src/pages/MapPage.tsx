@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useCountries, useCountrySchools, type CountryStat } from "../api/client";
 import { WorldMap } from "../map/WorldMap";
 import { breaks, regionsFor, useWorld, type Region } from "../map/world";
@@ -125,11 +125,11 @@ function CountryDetail({ country, onBack }: { country: CountryStat; onBack: () =
         <ol className="bars">
           {schools.data.map((s, i) => (
             <li key={s.school} className="rise" style={rise(i)}>
-              <div className="bar-row">
+              <Link to={`/s/${s.id}`} className="bar-row">
                 <span className="bar-name">{s.school}</span>
                 <span className="bar-value mono">{fmt.format(s.mathematicians)}</span>
                 <span className="bar" style={{ "--w": s.mathematicians / max, "--i": Math.min(i, 12) } as React.CSSProperties} />
-              </div>
+              </Link>
             </li>
           ))}
         </ol>

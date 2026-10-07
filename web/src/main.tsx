@@ -6,6 +6,7 @@ import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
 import { PersonPage } from "./pages/PersonPage";
 import { SearchPage } from "./pages/SearchPage";
+import { SchoolPage } from "./pages/SchoolPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import "./styles.css";
 
@@ -30,6 +31,7 @@ createRoot(document.getElementById("root")!).render(
             <Route index element={<HomePage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="m/:id" element={<PersonPage />} />
+            <Route path="s/:id" element={<SchoolPage />} />
             <Route
               path="map"
               element={

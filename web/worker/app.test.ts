@@ -1,5 +1,5 @@
 import { describe, expect, inject, test } from "vitest";
-import type { CountryStat, Graph, Person, PersonDetail, SchoolStat, Stats } from "../shared/types";
+import type { CountryStat, Graph, Person, PersonDetail, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../shared/types";
 import { createApp, normalizeQuery, prettyCountry } from "./app";
 
 // The database holds tests/fixtures/family.sql: a small slice of a real lineage with one
@@ -31,7 +31,7 @@ describe("search", () => {
 describe("person", () => {
   test("lists advisors, students and descendants", async () => {
     const p = await json<PersonDetail>("/mathematicians/4");
-    expect(p).toMatchObject({ name: "C. Felix Klein", country: "Germany", student_count: 1, descendant_count: 1 });
+    expect(p).toMatchObject({ name: "C. Felix Klein", school_id: 3, country: "Germany", student_count: 1, descendant_count: 1 });
     expect(p.advisors.map((a) => a.id)).toEqual([3, 5]);
     expect(p.students.map((s) => s.id)).toEqual([7]);
   });
@@ -73,12 +73,37 @@ test("countries count mathematicians by their school's country", async () => {
     { country: "Germany", name: "Germany", mathematicians: 5, schools: 3 },
     { country: "Austria", name: "Austria", mathematicians: 1, schools: 1 },
   ]);
+  // school ids follow the fixture's insert order
   expect(await json<SchoolStat[]>("/countries/Germany/schools")).toEqual([
-    { school: "Universität Bonn", mathematicians: 2 },
-    { school: "Universität Helmstedt", mathematicians: 2 },
-    { school: "Universität Marburg", mathematicians: 1 },
+    { id: 3, school: "Universität Bonn", mathematicians: 2 },
+    { id: 1, school: "Universität Helmstedt", mathematicians: 2 },
+    { id: 2, school: "Universität Marburg", mathematicians: 1 },
   ]);
   expect(await json<SchoolStat[]>("/countries/Atlantis/schools")).toEqual([]);
+});
+
+describe("schools", () => {
+  test("list their graduates, newest first, with degrees by decade", async () => {
+    expect(await json<SchoolDetail>("/schools/3")).toMatchObject({
+      name: "Universität Bonn",
+      countries: [{ country: "Germany", name: "Germany" }],
+      mathematicians: 2,
+      first_year: 1853,
+      last_year: 1868,
+      decades: [
+        { decade: 1850, count: 1 },
+        { decade: 1860, count: 1 },
+      ],
+      people: [{ id: 4 }, { id: 5 }],
+    });
+    expect((await get("/schools/999")).status).toBe(404);
+  });
+
+  test("are searchable ignoring accents", async () => {
+    expect((await json<SchoolHit[]>("/schools/search?q=bonn")).map((s) => s.id)).toEqual([3]);
+    expect(await json<SchoolHit[]>("/schools/search?q=wien")).toEqual([{ id: 4, name: "Universität Wien", country: "Austria", mathematicians: 1 }]);
+    expect((await json<SchoolHit[]>("/schools/search?q=universitat")).length).toBe(4);
+  });
 });
 
 test("helpers", () => {

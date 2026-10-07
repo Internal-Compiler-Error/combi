@@ -7,6 +7,8 @@ export type Person = {
   name: string;
   year: number | null;
   school: string | null;
+  /** for /schools/{id}; null when the school is unknown */
+  school_id: number | null;
   country: string | null;
   /** students recorded in the database, which may be fewer than the site lists */
   student_count: number;
@@ -82,12 +84,28 @@ export type CountryStat = {
   schools: number;
 };
 
-export type SchoolStat = { school: string; mathematicians: number };
+export type SchoolStat = { id: number; school: string; mathematicians: number };
+
+export type SchoolDetail = {
+  id: number;
+  name: string;
+  countries: { country: string; name: string }[];
+  mathematicians: number;
+  first_year: number | null;
+  last_year: number | null;
+  /** degrees per decade, oldest first; only decades with any */
+  decades: { decade: number; count: number }[];
+  /** graduates, newest first, at most MAX_SCHOOL_PEOPLE */
+  people: Person[];
+};
+
+export type SchoolHit = { id: number; name: string; country: string | null; mathematicians: number };
 
 export type ApiErrorBody = { error: string };
 
 export const MAX_GRAPH_DEPTH = 6;
 export const MAX_GRAPH_NODES = 1500;
+export const MAX_SCHOOL_PEOPLE = 2000;
 /** a page crawled more recently than this is not fetched again */
 export const RECRAWL_AFTER_DAYS = 14;
 

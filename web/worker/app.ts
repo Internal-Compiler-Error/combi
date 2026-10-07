@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import postgres from "postgres";
-import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, type ApiErrorBody, type CountryStat, type CrawlResult, type Graph, type MgpHit, type SchoolStat, type GraphLink, type Person, type PersonDetail, type Stats } from "../shared/types";
+import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, MAX_SCHOOL_PEOPLE, type ApiErrorBody, type CountryStat, type CrawlResult, type Graph, type MgpHit, type SchoolDetail, type SchoolHit, type SchoolStat, type GraphLink, type Person, type PersonDetail, type Stats } from "../shared/types";
 import { crawl, fetchMgpPage, fetchMgpSearch, mgpQuery, MgpNotFound, parseSearchResults, UpstreamError, type FetchPage, type FetchSearch } from "./crawl";
 
 type Sql = postgres.Sql;
@@ -30,7 +30,15 @@ function intParam(raw: string | undefined, fallback: number): number {
   return Number.isInteger(n) ? n : fallback;
 }
 
-type PersonRow = { id: number; name: string | null; year: number | null; school: string | null; country: string | null; student_count: number | null };
+type PersonRow = {
+  id: number;
+  name: string | null;
+  year: number | null;
+  school: string | null;
+  school_id: number | null;
+  country: string | null;
+  student_count: number | null;
+};
 
 function toPerson(r: PersonRow): Person {
   return {
@@ -38,6 +46,7 @@ function toPerson(r: PersonRow): Person {
     name: r.name ?? `Unknown (ID ${r.id})`,
     year: r.year,
     school: r.school,
+    school_id: r.school_id,
     country: r.country ? prettyCountry(r.country) : null,
     student_count: r.student_count ?? 0,
   };
@@ -46,6 +55,7 @@ function toPerson(r: PersonRow): Person {
 // Every person-shaped query selects these columns, so rows map straight onto `Person`.
 const personColumns = (sql: Sql | postgres.TransactionSql) => sql`
   m.id, m.name, m.graduating_year as year, m.school,
+  (select id from schools s where s.name = m.school) as school_id,
   (select string_agg(country, ', ' order by country) from school_locations l where l.school = m.school) as country,
   (select count(*)::int from advisor_relations sc where sc.advisor = m.id) as student_count`;
 
@@ -254,19 +264,73 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
 
   app.get("/countries/:country/schools", async (c) => {
     const rows = await c.var.sql<SchoolStat[]>`
-      select l.school, count(*)::int as mathematicians
-      from school_locations l join mathematicians m on m.school = l.school
+      select s.id, s.name as school, count(*)::int as mathematicians
+      from school_locations l join schools s on s.name = l.school join mathematicians m on m.school = l.school
       where l.country = ${c.req.param("country")}
-      group by l.school
-      order by mathematicians desc, l.school
+      group by s.id, s.name
+      order by mathematicians desc, s.name
       limit 500`;
     return c.json<SchoolStat[]>(rows);
+  });
+
+  app.get("/schools/:id{[0-9]+}", async (c) => {
+    const sql = c.var.sql;
+    const id = Number(c.req.param("id"));
+    const [school] = await sql<{ name: string }[]>`select name from schools where id = ${id}`;
+    if (!school) return c.json<ApiErrorBody>({ error: "No school with that ID is in the database" }, 404);
+
+    const [countries, [summary], decades, people] = await Promise.all([
+      sql<{ country: string }[]>`select country from school_locations where school = ${school.name} order by country`,
+      sql<[{ mathematicians: number; first_year: number | null; last_year: number | null }]>`
+        select count(*)::int as mathematicians, min(graduating_year) as first_year, max(graduating_year) as last_year
+        from mathematicians where school = ${school.name}`,
+      sql<{ decade: number; count: number }[]>`
+        select (graduating_year / 10 * 10)::int as decade, count(*)::int as count
+        from mathematicians where school = ${school.name} and graduating_year is not null
+        group by 1 order by 1`,
+      sql<PersonRow[]>`
+        select ${personColumns(sql)} from mathematicians m
+        where m.school = ${school.name}
+        order by m.graduating_year desc nulls last, m.name
+        limit ${MAX_SCHOOL_PEOPLE}`,
+    ]);
+    return c.json<SchoolDetail>({
+      id,
+      name: school.name,
+      countries: countries.map((r) => ({ country: r.country, name: prettyCountry(r.country) })),
+      ...summary,
+      decades: [...decades],
+      people: people.map(toPerson),
+    });
+  });
+
+  app.get("/schools/search", async (c) => {
+    const q = normalizeQuery(c.req.query("q") ?? "");
+    if (!q) return c.json<SchoolHit[]>([]);
+    const limit = clamp(intParam(c.req.query("limit"), 8), 1, 50);
+    // the same matching as people's names, against the school's lower-cased, accent-free name
+    const rows = await c.var.sql.begin(async (tx) => {
+      await tx`set local pg_trgm.word_similarity_threshold = 0.45`;
+      return tx<(Omit<SchoolHit, "country"> & { country: string | null })[]>`
+        with q as (select lower(immutable_unaccent(${q})) as q)
+        select s.id, s.name,
+               (select string_agg(country, ', ' order by country) from school_locations l where l.school = s.name) as country,
+               (select count(*)::int from mathematicians m where m.school = s.name) as mathematicians
+        from schools s, q
+        where s.search_name like '%' || replace(q.q, ' ', '%') || '%' or q.q <% s.search_name
+        order by s.search_name like replace(q.q, ' ', '%') || '%' desc,
+                 word_similarity(q.q, s.search_name) desc,
+                 mathematicians desc
+        limit ${limit}`;
+    });
+    return c.json<SchoolHit[]>(rows.map((r) => ({ ...r, country: r.country && r.country.split(", ").map(prettyCountry).join(", ") })));
   });
 
   /** The advisors with the most students on record, as starting points for browsing. */
   app.get("/notable", async (c) => {
     const rows = await c.var.sql<PersonRow[]>`
       select m.id, m.name, m.graduating_year as year, m.school,
+             (select id from schools s where s.name = m.school) as school_id,
              (select string_agg(country, ', ' order by country) from school_locations l where l.school = m.school) as country,
              c.n as student_count
       from (select advisor, count(*)::int as n from advisor_relations group by advisor order by n desc, advisor limit 12) c

@@ -83,6 +83,8 @@ To use a different database in development, set
 | `GET /api/mgp/search?q=` | MGP's own search, marking who is already in the database. One word is a family name; with more, the first is the given name and the last the family name. Shares the crawl rate limit |
 | `GET /api/countries` | Mathematicians and schools per country, by where the degree was awarded |
 | `GET /api/countries/{country}/schools` | That country's schools with their mathematician counts; `country` is MGP's name, e.g. `UnitedStates` |
+| `GET /api/schools/{id}` | A school: its countries, degrees per decade and graduates, newest first (up to 2,000) |
+| `GET /api/schools/search?q=&limit=` | Schools whose name matches, with the same accent- and typo-tolerant matching as people |
 | `GET /api/stats` | Counts for the whole database |
 | `GET /api/notable` | The 12 people with the most students on record |
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { useMgpSearch, useSearch, type Person } from "../api/client";
+import { useMgpSearch, useSchoolSearch, useSearch, type Person } from "../api/client";
 import { CrawlButton } from "../components/CrawlButton";
 import { rise } from "../motion";
 
@@ -21,6 +21,7 @@ export function SearchPage() {
         <>
           <p className="muted small">{data.length === 100 ? "Showing the first 100 matches." : `${data.length} match${data.length === 1 ? "" : "es"}.`}</p>
           {data.length > 0 && <Results people={data} />}
+          {id === null && <Schools q={q} />}
           {id !== null
             ? !data.some((p) => p.id === id) && <MissingId id={id} />
             : <MgpResults q={q} auto={data.length === 0} />}
@@ -49,7 +50,7 @@ function Results({ people }: { people: Person[] }) {
             </td>
             <td className="num mono">{p.year ?? "—"}</td>
             <td className="muted">
-              {p.school ?? "—"}
+              {p.school_id !== null ? <Link to={`/s/${p.school_id}`}>{p.school}</Link> : (p.school ?? "—")}
               {p.country && <span className="small"> · {p.country}</span>}
             </td>
             <td className="num mono">{p.student_count || ""}</td>
@@ -57,6 +58,27 @@ function Results({ people }: { people: Person[] }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function Schools({ q }: { q: string }) {
+  const { data } = useSchoolSearch(q, 10);
+  if (!data?.length) return null;
+  return (
+    <section className="mgp">
+      <h2 className="label">Schools</h2>
+      <ul className="people school-hits">
+        {data.map((s, i) => (
+          <li key={s.id} className="rise" style={rise(i)}>
+            <Link to={`/s/${s.id}`} className="people-name">
+              {s.name}
+              {s.country && <span className="muted small"> · {s.country}</span>}
+            </Link>
+            <span className="people-meta mono">{s.mathematicians}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

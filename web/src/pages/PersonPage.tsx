@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Link } from "react-router";
-import { ApiError, degreeLine, mgpUrl, useGraph, usePerson, type Graph } from "../api/client";
+import { ApiError, mgpUrl, useGraph, usePerson, type Graph } from "../api/client";
+import { DegreeLine } from "../components/DegreeLine";
 import { RadialGraph } from "../components/RadialGraph";
 import { PersonList } from "../components/PersonList";
 import { CrawlButton } from "../components/CrawlButton";
@@ -95,7 +96,7 @@ export function PersonPage() {
         <p className="label">MGP ID {p.id}</p>
         <h1>{p.name}</h1>
         <p className="person-degree">
-          {degreeLine(p)}
+          <DegreeLine p={p} />
           {p.country && <span className="muted"> · {p.country}</span>}
         </p>
         {p.dissertation ? <blockquote className="dissertation">{p.dissertation}</blockquote> : <p className="muted small">No dissertation title on record.</p>}

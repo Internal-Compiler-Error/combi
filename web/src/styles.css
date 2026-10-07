@@ -281,8 +281,9 @@ svg[data-tier="0"] .tier-1:not(.force), svg[data-tier="0"] .tier-2:not(.force), 
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px;
   background: none; text-align: left; font-size: 14px; color: var(--ink);
 }
-.bars button { transition: background-color 0.15s; }
-.bars button:hover { background: var(--accent-soft); }
+.bar-row { text-decoration: none; }
+.bars button, .bars .bar-row { transition: background-color 0.15s; }
+.bars button:hover, .bars .bar-row:hover { background: var(--accent-soft); }
 .bar-name { min-width: 0; overflow-wrap: anywhere; }
 .bar-value { color: var(--ink-2); font-size: 13px; }
 .bar {
@@ -300,6 +301,35 @@ svg[data-tier="0"] .tier-1:not(.force), svg[data-tier="0"] .tier-2:not(.force), 
   .map-layout { grid-template-columns: minmax(0, 1fr); }
   .map-side { max-height: none; overflow: visible; }
 }
+
+/* ---------- school ---------- */
+.school { display: flex; flex-direction: column; gap: 12px; }
+.school .page-title { margin: 0; }
+.school-where { margin: 0; }
+.school .counts { max-width: 520px; }
+.school-hits { width: 100%; }
+.decades { margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.decade-cols { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--rule); }
+.decade { position: relative; flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.decade-bar {
+  width: 100%; height: calc(var(--h) * 100%); min-height: 1px; border-radius: 4px 4px 0 0; background: var(--accent);
+  transform-origin: bottom; animation: grow-y 0.6s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 18ms + 120ms);
+  transition: opacity 0.15s;
+}
+.decade-cols:hover .decade-bar { opacity: 0.45; }
+.decade-cols .decade:hover .decade-bar { opacity: 1; }
+.decade-tip {
+  position: absolute; bottom: calc(var(--h) * 100% + 6px); left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+  padding: 2px 6px; border-radius: 4px; font: 12px var(--font-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
+  opacity: 0; transition: opacity 0.12s;
+}
+.decade:hover .decade-tip { opacity: 1; }
+.decade-axis { display: flex; gap: 2px; font-size: 11px; color: var(--ink-3); }
+.decade-axis span { flex: 1; min-width: 0; overflow: visible; white-space: nowrap; }
+@keyframes grow-y { from { transform: scaleY(0); } }
+.graduates { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.graduates-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.filter { font: inherit; font-size: 14px; padding: 6px 10px; color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; width: min(260px, 100%); }
 
 /* ---------- motion ----------
    Things settle into place: short, one easing curve, a few pixels of travel, never a bounce.
