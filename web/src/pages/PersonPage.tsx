@@ -126,6 +126,9 @@ export function PersonPage() {
           </p>
         )}
         <CrawlButton id={p.id} lastCrawled={p.last_crawled} label={p.last_crawled ? "Crawl again" : "Crawl their page"} />
+        <Link className="ext" to={`/relate?a=${p.id}`}>
+          How are they related to someone else? →
+        </Link>
         <a className="ext" href={mgpUrl(p.id)} target="_blank" rel="noreferrer">
           Open on Mathematics Genealogy Project ↗
         </a>

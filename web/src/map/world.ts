@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { geoArea, geoEqualEarth, geoPath, type GeoProjection } from "d3-geo";
 import { feature } from "topojson-client";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import type { GeometryCollection, Topology } from "topojson-specification";
@@ -32,6 +33,40 @@ export type Region = {
   shape?: Shape;
   dot?: [number, number];
 };
+
+export const MAP_WIDTH = 960;
+
+/** The world in Equal Earth, scaled to MAP_WIDTH; height is however tall that makes it. */
+export function fitWorld(shapes: Shape[]) {
+  const collection = { type: "FeatureCollection" as const, features: shapes };
+  const projection = geoEqualEarth().fitWidth(MAP_WIDTH, collection);
+  const path = geoPath(projection);
+  const [, [, bottom]] = path.bounds(collection);
+  return { projection, path, height: Math.ceil(bottom) + 2 };
+}
+
+/**
+ * Where on the map a region's arcs start and end: the middle of its largest landmass, so
+ * France sits in Europe rather than between it and French Guiana.
+ */
+export function anchorOf(region: Region, projection: GeoProjection): [number, number] | null {
+  if (region.dot) return projection(region.dot);
+  const g = region.shape!.geometry;
+  const polygon =
+    g.type === "MultiPolygon"
+      ? g.coordinates.map((coordinates) => ({ type: "Polygon" as const, coordinates })).sort((x, y) => geoArea(y) - geoArea(x))[0]!
+      : g;
+  const [x, y] = geoPath(projection).centroid(polygon);
+  return Number.isFinite(x) ? [x, y] : null;
+}
+
+/** Where an MGP country is drawn: its shape, or a dot for places too small to have one. */
+export function locate(country: string, shapes: Shape[]): Pick<Region, "key" | "shape" | "dot"> | null {
+  const key = shapeKey(country);
+  const shape = shapes.find((s) => letters(s.properties.name) === key);
+  const dot = shape ? undefined : DOTS[country];
+  return shape || dot ? { key, shape, dot } : null;
+}
 
 export function regionsFor(countries: CountryStat[], shapes: Shape[]) {
   const byKey = new Map(shapes.map((s) => [letters(s.properties.name), s]));

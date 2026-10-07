@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ApiErrorBody, CountryStat, CrawlResult, Graph, GraphParams, MgpHit, Person, PersonDetail, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../../shared/types";
+import type { ApiErrorBody, CountryStat, CrawlResult, Flows, Graph, GraphParams, MgpHit, Person, PersonDetail, Relation, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../../shared/types";
 
-export type { CountryStat, CrawlResult, Graph, GraphNode, GraphLink, MgpHit, Person, PersonDetail, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../../shared/types";
+export type { CountryStat, CrawlResult, Flows, Graph, GraphNode, GraphLink, MgpHit, Person, PersonDetail, Relation, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../../shared/types";
 export { MAX_SCHOOL_PEOPLE, mgpUrl, RECRAWL_AFTER_DAYS } from "../../shared/types";
 
 export class ApiError extends Error {
@@ -62,8 +62,19 @@ export const useSchoolSearch = (q: string, limit = 8) =>
     placeholderData: keepPreviousData,
   });
 
-export const usePerson = (id: number) =>
-  useQuery({ queryKey: ["person", id], queryFn: () => get<PersonDetail>(`/mathematicians/${id}`) });
+/** Cross-border advisor links, for one decade of students' degrees or (null) all time. */
+export const useFlows = (decade: number | null) =>
+  useQuery({
+    queryKey: ["flows", decade],
+    queryFn: () => get<Flows>("/flows", decade === null ? {} : { from: decade, to: decade + 9 }),
+    placeholderData: keepPreviousData,
+  });
+
+export const useRelation = (a: number | null, b: number | null) =>
+  useQuery({ queryKey: ["relation", a, b], queryFn: () => get<Relation>("/relation", { a: a!, b: b! }), enabled: a !== null && b !== null });
+
+export const usePerson = (id: number, enabled = true) =>
+  useQuery({ queryKey: ["person", id], queryFn: () => get<PersonDetail>(`/mathematicians/${id}`), enabled });
 
 export const useGraph = (id: number, params: Required<GraphParams>) =>
   useQuery({

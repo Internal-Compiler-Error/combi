@@ -7,11 +7,13 @@ import { HomePage } from "./pages/HomePage";
 import { PersonPage } from "./pages/PersonPage";
 import { SearchPage } from "./pages/SearchPage";
 import { SchoolPage } from "./pages/SchoolPage";
+import { RelatePage } from "./pages/RelatePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import "./styles.css";
 
 // the map brings d3-geo and the world's outlines, so it loads only when someone opens it
 const MapPage = lazy(() => import("./pages/MapPage"));
+const FlowsPage = lazy(() => import("./pages/FlowsPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,6 +34,15 @@ createRoot(document.getElementById("root")!).render(
             <Route path="search" element={<SearchPage />} />
             <Route path="m/:id" element={<PersonPage />} />
             <Route path="s/:id" element={<SchoolPage />} />
+            <Route path="relate" element={<RelatePage />} />
+            <Route
+              path="flows"
+              element={
+                <Suspense fallback={<main className="page" />}>
+                  <FlowsPage />
+                </Suspense>
+              }
+            />
             <Route
               path="map"
               element={

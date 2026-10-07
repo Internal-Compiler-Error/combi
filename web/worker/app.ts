@@ -1,6 +1,26 @@
 import { Hono } from "hono";
 import postgres from "postgres";
-import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, MAX_SCHOOL_PEOPLE, type ApiErrorBody, type CountryStat, type CrawlResult, type Graph, type MgpHit, type SchoolDetail, type SchoolHit, type SchoolStat, type GraphLink, type Person, type PersonDetail, type Stats } from "../shared/types";
+import {
+  MAX_GRAPH_DEPTH,
+  MAX_GRAPH_NODES,
+  MAX_RELATION_DEPTH,
+  MAX_SCHOOL_PEOPLE,
+  type ApiErrorBody,
+  type CountryStat,
+  type CrawlResult,
+  type Flows,
+  type Graph,
+  type GraphLink,
+  type MgpHit,
+  type Person,
+  type PersonDetail,
+  type Relation,
+  type SchoolDetail,
+  type SchoolHit,
+  type SchoolStat,
+  type Stats,
+} from "../shared/types";
+import { prettyCountry } from "../shared/names";
 import { crawl, fetchMgpPage, fetchMgpSearch, mgpQuery, MgpNotFound, parseSearchResults, UpstreamError, type FetchPage, type FetchSearch } from "./crawl";
 
 type Sql = postgres.Sql;
@@ -8,10 +28,6 @@ type Vars = { sql: Sql };
 
 class NotFound extends Error {}
 
-/** The Mathematics Genealogy Project names countries after its flag images ("UnitedStates"); put the spaces back. */
-export function prettyCountry(raw: string): string {
-  return raw.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2");
-}
 
 /** Escape LIKE wildcards and collapse whitespace so user input is matched literally. */
 export function normalizeQuery(q: string): string {
@@ -324,6 +340,81 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
         limit ${limit}`;
     });
     return c.json<SchoolHit[]>(rows.map((r) => ({ ...r, country: r.country && r.country.split(", ").map(prettyCountry).join(", ") })));
+  });
+
+  app.get("/flows", async (c) => {
+    const sql = c.var.sql;
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    // without a range, links whose student has no recorded year count too
+    const inRange = from || to ? sql`and s.graduating_year between ${intParam(from, -9999)} and ${intParam(to, 9999)}` : sql``;
+    const crossBorder = sql`
+      from advisor_relations r
+      join mathematicians a on a.id = r.advisor join school_locations la on la.school = a.school
+      join mathematicians s on s.id = r.advisee join school_locations ls on ls.school = s.school
+      where la.country <> ls.country`;
+    const [flows, decades] = await Promise.all([
+      sql<Flows["flows"]>`
+        select la.country as "from", ls.country as "to", count(*)::int as count
+        ${crossBorder} ${inRange}
+        group by 1, 2 order by 3 desc, 1, 2`,
+      sql<Flows["decades"]>`
+        select (s.graduating_year / 10 * 10)::int as decade, count(*)::int as count
+        ${crossBorder} and s.graduating_year is not null
+        group by 1 order by 1`,
+    ]);
+    return c.json<Flows>({ flows: [...flows], decades: [...decades] });
+  });
+
+  app.get("/relation", async (c) => {
+    const sql = c.var.sql;
+    const a = Number(c.req.query("a"));
+    const b = Number(c.req.query("b"));
+    if (!Number.isInteger(a) || !Number.isInteger(b)) return c.json<ApiErrorBody>({ error: "Give two MGP IDs as a and b" }, 400);
+
+    // everyone above a person, each at their nearest generation, with the student one step
+    // nearer the person (`via`) so the shortest line back down can be followed
+    type Up = { id: number; depth: number; via: number | null };
+    const up = (id: number) => sql<Up[]>`
+      with recursive up(id, depth, via) as (
+        select ${id}::int, 0, null::int
+        union
+        select r.advisor, u.depth + 1, u.id from advisor_relations r join up u on r.advisee = u.id where u.depth < ${MAX_RELATION_DEPTH}
+      )
+      select distinct on (id) id, depth, via from up order by id, depth, via`;
+    const [upA, upB] = await Promise.all([up(a), up(b)]);
+    const fromA = new Map(upA.map((r) => [r.id, r]));
+    const fromB = new Map(upB.map((r) => [r.id, r]));
+
+    // nearest shared ancestor: fewest generations in total, then the most even split
+    let best: { id: number; total: number; spread: number } | null = null;
+    for (const [id, ra] of fromA) {
+      const rb = fromB.get(id);
+      if (!rb) continue;
+      const total = ra.depth + rb.depth;
+      const spread = Math.abs(ra.depth - rb.depth);
+      if (!best || total < best.total || (total === best.total && spread < best.spread)) best = { id, total, spread };
+    }
+    const down = (from: Map<number, Up>, top: number) => {
+      const ids = [top];
+      for (let at = from.get(top)!; at.via !== null; at = from.get(at.via)!) ids.push(at.via);
+      return ids;
+    };
+    const idsA = best ? down(fromA, best.id) : [];
+    const idsB = best ? down(fromB, best.id) : [];
+
+    // an array literal, as in the graph query: these are integers, from the URL or the database
+    const all = `{${[...new Set([a, b, ...idsA, ...idsB])].join(",")}}`;
+    const rows = await sql<PersonRow[]>`select ${personColumns(sql)} from mathematicians m where m.id = any(${all}::int[])`;
+    const byId = new Map(rows.map((r) => [r.id, toPerson(r)]));
+    if (!byId.has(a) || !byId.has(b)) throw new NotFound();
+    return c.json<Relation>({
+      a: byId.get(a)!,
+      b: byId.get(b)!,
+      ancestor: best ? byId.get(best.id)! : null,
+      pathA: idsA.map((id) => byId.get(id)!),
+      pathB: idsB.map((id) => byId.get(id)!),
+    });
   });
 
   /** The advisors with the most students on record, as starting points for browsing. */

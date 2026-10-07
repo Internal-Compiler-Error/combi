@@ -31,6 +31,8 @@ const ID_IN_HREF = /id\.php\?id=(\d+)/;
 const NOT_FOUND = "You have specified an ID that does not exist in the database. Please back up and try again.";
 
 const squash = (s: string) => s.trim().replace(/\s+/g, " ");
+// MGP has typos like a degree "200" from a university founded in 1989; no degree on it predates 1000
+const plausibleYear = (n: number) => (Number.isInteger(n) && n >= 1000 && n <= new Date().getFullYear() + 1 ? n : null);
 const orNull = (s: string | undefined) => (s ? squash(s) || null : null);
 
 function hrefId(a: HTMLElement): number | null {
@@ -50,8 +52,7 @@ function parseListedPerson(row: HTMLElement): Student | null {
   const a = nameCell?.querySelector("a");
   const id = a && hrefId(a);
   if (!a || id == null) return null;
-  const year = Number(yearCell?.text.trim() || NaN);
-  return { id, name: unsurname(a.text), school: orNull(schoolCell?.text), year: Number.isInteger(year) ? year : null };
+  return { id, name: unsurname(a.text), school: orNull(schoolCell?.text), year: plausibleYear(Number(yearCell?.text.trim() || NaN)) };
 }
 
 /** Returns null when MGP has no one with this ID. */
@@ -84,7 +85,7 @@ export function parsePage(id: number, html: string): MgpPage | null {
     dissertation: orNull(doc.querySelector("#thesisTitle")?.text),
     school: orNull(degree?.querySelector("span")?.text),
     country: orNull(doc.querySelector("div > img")?.getAttribute("alt")),
-    year: yearText ? Number(yearText) : null,
+    year: yearText ? plausibleYear(Number(yearText)) : null,
     advisors,
     students,
   };

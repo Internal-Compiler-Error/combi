@@ -85,6 +85,8 @@ To use a different database in development, set
 | `GET /api/countries/{country}/schools` | That country's schools with their mathematician counts; `country` is MGP's name, e.g. `UnitedStates` |
 | `GET /api/schools/{id}` | A school: its countries, degrees per decade and graduates, newest first (up to 2,000) |
 | `GET /api/schools/search?q=&limit=` | Schools whose name matches, with the same accent- and typo-tolerant matching as people |
+| `GET /api/flows?from=&to=` | Advisor–student links that cross borders, as advisor's degree country → student's, optionally for students who graduated in a year range; plus cross-border links per decade |
+| `GET /api/relation?a=&b=` | Two people's nearest shared academic ancestor and the shortest line down from it to each |
 | `GET /api/stats` | Counts for the whole database |
 | `GET /api/notable` | The 12 people with the most students on record |
 

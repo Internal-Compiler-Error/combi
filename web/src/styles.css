@@ -331,6 +331,62 @@ svg[data-tier="0"] .tier-1:not(.force), svg[data-tier="0"] .tier-2:not(.force), 
 .graduates-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .filter { font: inherit; font-size: 14px; padding: 6px 10px; color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; width: min(260px, 100%); }
 
+/* ---------- flows ---------- */
+.timeline { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.timeline-buttons { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.timeline-track { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 4px; }
+.timeline-cols { height: 64px; }
+.timeline-cols .decade { border: 0; padding: 0; background: none; cursor: pointer; }
+.timeline-cols .decade.is-off .decade-bar { opacity: 0.3; }
+.timeline-cols .decade.is-on .decade-bar { background: var(--ink); }
+.chip { font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink-2); transition: background-color 0.15s, color 0.15s, border-color 0.15s; }
+.chip.is-on { background: var(--accent-soft); color: var(--ink); border-color: var(--accent); }
+.flow-land { fill: var(--rule-soft); stroke: var(--surface); stroke-width: 0.6; transition: fill 0.3s; }
+.flow-land.is-live { fill: color-mix(in srgb, var(--rule) 70%, var(--rule-soft)); cursor: pointer; }
+.flow-land.is-live:hover { fill: var(--rule); }
+.flow-land.is-selected { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; }
+.flow-stop-from { stop-color: var(--accent); stop-opacity: 0.08; }
+.flow-stop-to { stop-color: var(--accent); stop-opacity: 0.9; }
+.flow-arc {
+  fill: none; stroke-linecap: round; stroke-dasharray: 1; pointer-events: none;
+  animation: draw 0.9s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 16ms);
+  transition: opacity 0.2s var(--ease-out);
+}
+.flow-arc.is-dim { opacity: 0.18; }
+.flow-hit { fill: none; stroke: transparent; cursor: pointer; }
+.flow-node { fill: var(--ink-2); stroke: var(--surface); stroke-width: 1.5; pointer-events: none; transition: r 0.2s var(--ease-out); }
+.flow-node.is-selected { fill: var(--accent); }
+.country h3 { margin-top: 8px; }
+
+/* ---------- relate ---------- */
+.relate { display: flex; flex-direction: column; gap: 14px; }
+.relate .page-title { margin: 0; }
+.relate > p { margin: 0; }
+.pickers { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: start; }
+.pickers-and { align-self: center; color: var(--ink-3); font-family: var(--font-display); font-style: italic; }
+.picker { display: flex; flex-direction: column; gap: 4px; }
+.picker-chosen { padding: 10px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; animation: rise 0.3s var(--ease-out) backwards; }
+.picker-name { font: 600 18px/1.25 var(--font-display); text-decoration: none; }
+.picker .back { padding: 0; }
+.relate-result { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; animation: rise 0.36s var(--ease-out) backwards; }
+.relate-headline { font: 500 20px/1.4 var(--font-display); margin: 0; }
+.lineage { width: 100%; height: auto; margin-top: 12px; overflow: visible; }
+.lineage-link { fill: none; stroke: var(--edge); stroke-width: 1.5; stroke-dasharray: 1; animation: draw 0.5s var(--ease-out) backwards; animation-delay: calc(var(--gen) * 170ms - 60ms); }
+.lineage-node { cursor: pointer; animation: fade 0.4s ease-out backwards; animation-delay: calc(var(--gen) * 170ms); }
+.lineage-node circle { fill: var(--c-other); stroke: var(--surface); stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: pop 0.45s var(--ease-out) backwards; animation-delay: calc(var(--gen) * 170ms); transition: r 0.15s var(--ease-out); }
+.lineage-node.is-a circle { fill: var(--c1); }
+.lineage-node.is-b circle { fill: var(--c2); }
+.lineage-node.is-ancestor circle { fill: var(--surface); stroke: var(--ink); stroke-width: 2.5; }
+.lineage-node:hover .lineage-name, .lineage-node:focus-visible .lineage-name { text-decoration: underline; }
+.lineage-node:focus-visible { outline: none; }
+.lineage-name { font: 500 14px var(--font-body); fill: var(--ink); }
+.is-ancestor .lineage-name { font: 600 16px var(--font-display); }
+.lineage-meta { font: 12px var(--font-body); fill: var(--ink-3); }
+@media (max-width: 640px) {
+  .pickers { grid-template-columns: minmax(0, 1fr); }
+  .pickers-and { justify-self: center; }
+}
+
 /* ---------- motion ----------
    Things settle into place: short, one easing curve, a few pixels of travel, never a bounce.
    Entrances use `backwards` fill so nothing keeps a transform once it has arrived. */

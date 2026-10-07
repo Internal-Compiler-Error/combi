@@ -101,11 +101,33 @@ export type SchoolDetail = {
 
 export type SchoolHit = { id: number; name: string; country: string | null; mathematicians: number };
 
+/** Advisor–student links that cross borders: advisor's degree country to the student's. */
+export type Flows = {
+  /** MGP country names, as in CountryStat.country */
+  flows: { from: string; to: string; count: number }[];
+  /** cross-border links per decade of the student's degree, over all time, for the time slider */
+  decades: { decade: number; count: number }[];
+};
+
+/** How two mathematicians are related through their advisors. */
+export type Relation = {
+  a: Person;
+  b: Person;
+  /** their nearest shared academic ancestor, which may be a or b; null when the data links them nowhere */
+  ancestor: Person | null;
+  /** ancestor first, down to a; empty when unrelated */
+  pathA: Person[];
+  /** ancestor first, down to b */
+  pathB: Person[];
+};
+
 export type ApiErrorBody = { error: string };
 
 export const MAX_GRAPH_DEPTH = 6;
 export const MAX_GRAPH_NODES = 1500;
 export const MAX_SCHOOL_PEOPLE = 2000;
+/** how many generations up the relation finder looks from each person */
+export const MAX_RELATION_DEPTH = 60;
 /** a page crawled more recently than this is not fetched again */
 export const RECRAWL_AFTER_DAYS = 14;
 

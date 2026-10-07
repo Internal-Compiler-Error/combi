@@ -1,6 +1,6 @@
 import { describe, expect, inject, test } from "vitest";
-import type { CountryStat, Graph, Person, PersonDetail, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../shared/types";
-import { createApp, normalizeQuery, prettyCountry } from "./app";
+import type { CountryStat, Flows, Graph, Person, Relation, PersonDetail, SchoolDetail, SchoolHit, SchoolStat, Stats } from "../shared/types";
+import { createApp, normalizeQuery } from "./app";
 
 // The database holds tests/fixtures/family.sql: a small slice of a real lineage with one
 // student who has two advisors (Klein) and one person unconnected to the rest (Gödel).
@@ -106,8 +106,40 @@ describe("schools", () => {
   });
 });
 
+describe("relation", () => {
+  const relate = (a: number, b: number) => json<Relation>(`/relation?a=${a}&b=${b}`);
+  const ids = (people: Person[]) => people.map((p) => p.id);
+
+  test("finds the nearest shared ancestor, even when it is one of them", async () => {
+    // Lindemann (7) studied under Klein (4), a student of Lipschitz (5)
+    const r = await relate(7, 5);
+    expect(r.ancestor?.id).toBe(5);
+    expect(ids(r.pathA)).toEqual([5, 4, 7]);
+    expect(ids(r.pathB)).toEqual([5]);
+  });
+
+  test("follows the shortest line down", async () => {
+    const r = await relate(7, 2);
+    expect(r.ancestor?.id).toBe(2);
+    expect(ids(r.pathA)).toEqual([2, 3, 4, 7]);
+  });
+
+  test("says when the data links them nowhere", async () => {
+    const r = await relate(6, 1);
+    expect(r).toMatchObject({ ancestor: null, pathA: [], pathB: [], a: { id: 6 }, b: { id: 1 } });
+  });
+
+  test("is 404 for someone not in the database and 400 without two IDs", async () => {
+    expect((await get("/relation?a=1&b=999")).status).toBe(404);
+    expect((await get("/relation?a=1")).status).toBe(400);
+  });
+});
+
+test("flows only count links that cross a border", async () => {
+  // everyone linked in the fixture studied in Germany
+  expect(await json<Flows>("/flows")).toEqual({ flows: [], decades: [] });
+});
+
 test("helpers", () => {
-  expect(prettyCountry("UnitedStates")).toBe("United States");
-  expect(prettyCountry("HongKong")).toBe("Hong Kong");
   expect(normalizeQuery("  50%   off_by\\one ")).toBe("50\\% off\\_by\\\\one");
 });

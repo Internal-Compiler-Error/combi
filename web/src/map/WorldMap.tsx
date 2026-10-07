@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { geoEqualEarth, geoPath } from "d3-geo";
 import type { Region, Shape } from "./world";
-import { shadeOf } from "./world";
-
-const WIDTH = 960;
+import { fitWorld, MAP_WIDTH, shadeOf } from "./world";
 const fmt = new Intl.NumberFormat();
 
 type Props = {
@@ -26,13 +23,7 @@ export function WorldMap({ shapes, regions, thresholds, selected, onSelect }: Pr
     return () => (cancelAnimationFrame(outer), cancelAnimationFrame(inner));
   }, []);
 
-  const { path, project, height } = useMemo(() => {
-    const collection = { type: "FeatureCollection" as const, features: shapes };
-    const projection = geoEqualEarth().fitWidth(WIDTH, collection);
-    const path = geoPath(projection);
-    const [, [, bottom]] = path.bounds(collection);
-    return { path, project: projection, height: Math.ceil(bottom) + 2 };
-  }, [shapes]);
+  const { path, projection: project, height } = useMemo(() => fitWorld(shapes), [shapes]);
 
   const byShape = useMemo(() => new Map([...regions.values()].filter((r) => r.shape).map((r) => [r.shape!, r])), [regions]);
   const dots = useMemo(() => [...regions.values()].filter((r) => r.dot), [regions]);
@@ -54,7 +45,7 @@ export function WorldMap({ shapes, regions, thresholds, selected, onSelect }: Pr
   return (
     <div className="map" ref={wrapRef}>
       <svg
-        viewBox={`0 0 ${WIDTH} ${height}`}
+        viewBox={`0 0 ${MAP_WIDTH} ${height}`}
         className={ready ? "map-ready" : undefined}
         role="img"
         aria-label="World map shaded by how many mathematicians graduated from schools in each country; the list beside it has the same numbers"

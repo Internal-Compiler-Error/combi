@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, inject, test, vi } from "vitest";
-import type { CrawlResult, MgpHit, PersonDetail } from "../shared/types";
+import type { CrawlResult, MgpHit, PersonDetail, Relation } from "../shared/types";
 import { createApp } from "./app";
 import { mgpQuery, parsePage, parseSearchResults, type MgpQuery } from "./crawl";
 
@@ -55,6 +55,10 @@ describe("parsePage", () => {
   });
 
   test("an ID MGP doesn't have", () => expect(parsePage(1, missing)).toBeNull());
+
+  test("a year that can't be right is unknown", () => {
+    expect(parsePage(261324, fixture("knuth").replace(">1963</span>", ">200</span>"))!.year).toBeNull();
+  });
 });
 
 describe("MGP search", () => {
@@ -124,6 +128,13 @@ describe("crawl", () => {
     expect(fetchSearch).toHaveBeenCalledWith({ family_name: "knuth" });
     expect(hits.find((h) => h.id === 10416)).toMatchObject({ known: true, last_crawled: expect.any(String) });
     expect(hits.find((h) => h.id === 116483)).toMatchObject({ known: false, last_crawled: null });
+  });
+
+  test("two students of the same advisor are related through them", async () => {
+    const r = (await (await app.request("/api/relation?a=61940&b=47202", {}, env)).json()) as Relation;
+    expect(r.ancestor?.id).toBe(10416);
+    expect(r.pathA.map((p) => p.id)).toEqual([10416, 61940]);
+    expect(r.pathB.map((p) => p.id)).toEqual([10416, 47202]);
   });
 
   test("rejects IDs out of range", async () => expect((await post(0)).status).toBe(400));

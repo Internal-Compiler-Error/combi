@@ -13,6 +13,8 @@ export function Layout() {
         </Link>
         <nav className="topnav">
           <NavLink to="/map">Map</NavLink>
+          <NavLink to="/flows">Flows</NavLink>
+          <NavLink to="/relate">Relate</NavLink>
         </nav>
         {!onHome && <SearchBox className="topbar-search" />}
       </header>
