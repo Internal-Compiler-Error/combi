@@ -2,8 +2,8 @@ import postgres from "postgres";
 import { createApp } from "./app";
 import { PARALLEL, walkStep, type WalkMessage } from "./walk";
 
-/** between steps of a walk, so MGP gets a breather every STEP_FETCHES pages */
-const STEP_PAUSE_S = 3;
+/** between steps of a walk; MGP's load is capped by the MGP budget, not by this */
+const STEP_PAUSE_S = 1;
 /** after MGP couldn't be reached */
 const RETRY_PAUSE_S = 60;
 

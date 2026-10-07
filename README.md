@@ -37,8 +37,12 @@ for Donald Knuth, and press **Crawl their tree**.
 
 A crawl fetches that person's page straight away, then walks their tree in the background
 (`web/worker/walk.ts`): their students, their students' students and so on, and their advisors up
-the line. Each step of a walk is a message on the `combi-crawl` queue that fetches up to 8
-pages and queues the next step a few seconds later; a walk stops after 2,000 fetches.
+the line. Each step of a walk is a message on the `combi-crawl` queue that crawls up to 12
+pages, four at a time, and queues the next step; a walk stops after 2,000 fetches.
+
+Every request to MGP, from walks, crawl buttons and MGP searches alike, first takes a turn from
+one token bucket in Postgres (`web/worker/mgp-budget.ts`), so the whole site stays under 4
+requests a second however many walks are running.
 
 Pages are only fetched when due (`crawl_schedule`). Every crawl stores a hash of what the page
 said: unchanged, the page waits twice as long before the next check; changed, half as long

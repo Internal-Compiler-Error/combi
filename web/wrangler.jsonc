@@ -22,16 +22,17 @@
       "localConnectionString": "postgres://combi:combi@localhost:5432/combi"
     }
   ],
-  // Crawls and MGP searches fetch from MGP, a volunteer-run site; cap them per visitor.
+  // Crawls and MGP searches fetch from MGP, a volunteer-run site; cap how often each visitor can start one.
   // namespace_id is any number unique among this account's rate limiters.
   "ratelimits": [
     { "name": "MGP_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }
   ],
   // Crawl walks through someone's students and advisors, a step per message (worker/walk.ts).
-  // One consumer at a time keeps MGP's load to one walk step every few seconds.
+  // Several walks can step at once; every request to MGP waits for a turn in the shared
+  // budget (worker/mgp-budget.ts), which caps the site's overall rate.
   "queues": {
     "producers": [{ "binding": "CRAWL_QUEUE", "queue": "combi-crawl" }],
-    "consumers": [{ "queue": "combi-crawl", "max_batch_size": 1, "max_concurrency": 1, "max_retries": 3 }]
+    "consumers": [{ "queue": "combi-crawl", "max_batch_size": 1, "max_concurrency": 3, "max_retries": 3 }]
   },
   "observability": {
     "logs": {

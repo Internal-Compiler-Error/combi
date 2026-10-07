@@ -6,6 +6,7 @@ import type { CrawlResult, MgpHit, PersonDetail, Relation, WalkStatus } from "..
 import { createApp } from "./app";
 import { crawl, firstInterval, mgpQuery, nextInterval, parsePage, parseSearchResults, type MgpQuery } from "./crawl";
 import { startWalk, walkStep } from "./walk";
+import { mgpTurn, MGP_REQUESTS_PER_SECOND } from "./mgp-budget";
 
 const fixture = (name: string) => readFileSync(join(import.meta.dirname, "test/fixtures/mgp", `${name}.html`), "utf8");
 const pages: Record<number, string> = { 10416: fixture("knuth"), 135101: fixture("rajesh") };
@@ -220,4 +221,19 @@ describe("adaptive recrawling and walks", () => {
     const [w] = await sql<WalkStatus[]>`select status from crawl_walks where id = ${walk.id}`;
     expect(w!.status).toBe("capped");
   });
+});
+
+test("every request to MGP shares one budget of a few a second", async () => {
+  const sql = postgres(inject("emptyDatabaseUrl"), { max: 4, fetch_types: false, onnotice: () => {} });
+  try {
+    // let the bucket fill, then ask for two bursts' worth at once, as parallel walks would
+    await new Promise((r) => setTimeout(r, 1100));
+    const start = Date.now();
+    await Promise.all(Array.from({ length: 2 * MGP_REQUESTS_PER_SECOND }, () => mgpTurn(sql)));
+    const seconds = (Date.now() - start) / 1000;
+    expect(seconds).toBeGreaterThan(0.7);
+    expect(seconds).toBeLessThan(2.5);
+  } finally {
+    await sql.end();
+  }
 });

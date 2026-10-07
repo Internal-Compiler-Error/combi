@@ -23,6 +23,7 @@ import {
 } from "../shared/types";
 import { prettyCountry } from "../shared/names";
 import { latestWalk, startWalk, walkStatus } from "./walk";
+import { budgeted, budgetedSearch } from "./mgp-budget";
 import { crawl, fetchMgpPage, fetchMgpSearch, mgpQuery, MgpNotFound, parseSearchResults, UpstreamError, type FetchPage, type FetchSearch } from "./crawl";
 
 type Sql = postgres.Sql;
@@ -96,7 +97,10 @@ const crawledColumns = (sql: Sql) => sql`
 const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
 const crawledFields = (r: Crawled) => ({ last_crawled: iso(r.last_crawled), next_crawl: iso(r.next_crawl) });
 
-export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSearch }: { fetchPage?: FetchPage; fetchSearch?: FetchSearch } = {}) {
+/** `fetchPage` and `fetchSearch` replace MGP itself (in tests); the real ones wait their turn in the MGP budget. */
+export function createApp({ fetchPage, fetchSearch }: { fetchPage?: FetchPage; fetchSearch?: FetchSearch } = {}) {
+  const pageFetcher = (sql: Sql) => fetchPage ?? budgeted(sql, fetchMgpPage);
+  const searchFetcher = (sql: Sql) => fetchSearch ?? budgetedSearch(sql, fetchMgpSearch);
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath("/api");
 
   // One small connection pool per request: Hyperdrive does the real pooling at the edge.
@@ -201,7 +205,7 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
     if (!(await withinMgpLimit(c.env, c.req.header("cf-connecting-ip")))) return c.json<ApiErrorBody>({ error: "Too many requests to MGP; try again in a minute" }, 429);
 
     // their own page now, so it shows straight away; the rest of their tree in the background
-    const page = await crawl(c.var.sql, id, fetchPage);
+    const page = await crawl(c.var.sql, id, pageFetcher(c.var.sql));
     let walk: WalkStatus | null = null;
     if (c.env.CRAWL_QUEUE) {
       const started = await startWalk(c.var.sql, id);
@@ -228,7 +232,7 @@ export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSear
     if (!query) return c.json<MgpHit[]>([]);
     if (!(await withinMgpLimit(c.env, c.req.header("cf-connecting-ip")))) return c.json<ApiErrorBody>({ error: "Too many requests to MGP; try again in a minute" }, 429);
 
-    const hits = parseSearchResults(await fetchSearch(query)).slice(0, 100);
+    const hits = parseSearchResults(await searchFetcher(c.var.sql)(query)).slice(0, 100);
     if (!hits.length) return c.json<MgpHit[]>([]);
     // an array literal, as in the graph query: these are integers parsed from MGP's links
     const ids = `{${hits.map((h) => h.id).join(",")}}`;

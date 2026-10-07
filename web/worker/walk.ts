@@ -1,6 +1,7 @@
 import type postgres from "postgres";
 import { MAX_WALK_FETCHES, type WalkStatus } from "../shared/types";
 import { crawl, fetchMgpPage, MgpNotFound, UpstreamError, type FetchPage } from "./crawl";
+import { budgeted } from "./mgp-budget";
 
 /** The queue message that advances a walk by one step. */
 export type WalkMessage = { walk: number };
@@ -9,7 +10,8 @@ export type WalkMessage = { walk: number };
 export const STEP_FETCHES = 12;
 /** what one step may look at in all, counting pages that aren't due and are only read from the database */
 const STEP_VISITS = 40;
-/** pages crawled at once; MGP's latency, not CPU, is what a step spends most of its time on */
+/** pages crawled at once; MGP's latency, not CPU, is what a step spends most of its time on, and
+ * the MGP budget (mgp-budget.ts) keeps the overall rate in check however many run */
 export const PARALLEL = 4;
 
 type WalkRow = { id: number; root: number; status: WalkStatus["status"]; fetched: number; skipped: number; failed: number };
@@ -57,7 +59,7 @@ export async function startWalk(sql: postgres.Sql, root: number): Promise<{ walk
 export async function walkStep(
   sql: postgres.Sql,
   id: number,
-  { fetchPage = fetchMgpPage, maxFetches = MAX_WALK_FETCHES }: { fetchPage?: FetchPage; maxFetches?: number } = {},
+  { fetchPage = budgeted(sql, fetchMgpPage), maxFetches = MAX_WALK_FETCHES }: { fetchPage?: FetchPage; maxFetches?: number } = {},
 ): Promise<"more" | "wait" | "done"> {
   const [walk] = await sql<WalkRow[]>`select id::int, root, status, fetched, skipped, failed from crawl_walks where id = ${id}`;
   if (!walk || walk.status !== "running") return "done";
