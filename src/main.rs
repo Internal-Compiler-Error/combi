@@ -128,16 +128,16 @@ async fn insert_record(
 async fn insert_relations(
     repo: &mut sqlx::PgConnection,
     advisor: &MGPage,
-    descendants: &Vec<MGPage>) -> color_eyre::Result<()>
+    advisees: &[Id]) -> color_eyre::Result<()>
 {
-    for descendant in descendants {
+    for &advisee in advisees {
         let relation = AdvisorRelation {
             advisor: advisor.id,
-            advisee: descendant.id,
+            advisee,
         };
 
         (&mut *repo).update_advisor_relation(&relation).await?;
-        debug!("{}->{}: {}->{} inserted", advisor.id, descendant.id, advisor.name, descendant.name);
+        debug!("{}->{advisee} inserted", advisor.id);
     }
 
     Ok(())
@@ -147,7 +147,8 @@ async fn insert_relations(
 async fn insert_layer(
     pool: &PgPool,
     advisor: MGPage,
-    descendants: Vec<MGPage>) -> color_eyre::Result<()> {
+    descendants: Vec<MGPage>,
+    recently_scraped: Vec<Id>) -> color_eyre::Result<()> {
     let mut tx = pool.begin().await?;
 
     insert_record(&mut tx, advisor.clone()).await?;
@@ -155,7 +156,10 @@ async fn insert_layer(
         insert_record(&mut tx, descendant.clone()).await?;
     }
 
-    insert_relations(&mut tx, &advisor, &descendants).await?;
+    // recently scraped advisees are already in the mathematicians table from their own layer,
+    // so their edges can be recorded without downloading them again
+    let advisees: Vec<Id> = descendants.iter().map(|d| d.id).chain(recently_scraped).collect();
+    insert_relations(&mut tx, &advisor, &advisees).await?;
 
     sqlx::query!(
         "INSERT INTO scrape_logs(date, page_scraped, result) VALUES(NOW(), $1, 'success')",
@@ -295,22 +299,30 @@ impl Scraper {
         }
     }
 
-    async fn scrape_multiple_cached<I>(&self, ids: I, cache: &RwLock<BTreeMap<Id, MGPage>>) -> color_eyre::Result<Vec<MGPage>>
+    /// Return:
+    /// (pages obtained from cache or freshly downloaded, IDs skipped because they were recently scraped)
+    /// IDs that failed are logged and left out of both
+    async fn scrape_multiple_cached<I>(&self, ids: I, cache: &RwLock<BTreeMap<Id, MGPage>>) -> (Vec<MGPage>, Vec<Id>)
     where
         I: Iterator<Item=Id>,
     {
 
         let mut descendant_pages: FuturesUnordered<_> = ids
-            .map(|id| {
-                self.scrape_single_cached(id, cache)
+            .map(|id| async move {
+                (id, self.scrape_single_cached(id, cache).await)
             })
             .collect();
 
         let mut descendants = vec![];
-        while let Some(Ok(Some(page))) = descendant_pages.next().await {
-            descendants.push(page);
+        let mut recently_scraped = vec![];
+        while let Some((id, result)) = descendant_pages.next().await {
+            match result {
+                Ok(Some(page)) => descendants.push(page),
+                Ok(None) => recently_scraped.push(id),
+                Err(e) => warn!("Failed to scrape descendant {id}: {e}"),
+            }
         }
-        Ok(descendants)
+        (descendants, recently_scraped)
     }
 
     #[instrument(skip(self))]
@@ -343,9 +355,9 @@ impl Scraper {
         }
         let root_page = root_page.unwrap();
 
-        let descendants = self.scrape_multiple_cached(root_page.students.iter().map(|s| s.id), id2page).await?;
+        let (descendants, recently_scraped) = self.scrape_multiple_cached(root_page.students.iter().map(|s| s.id), id2page).await;
 
-        insert_layer(&self.db_pool, root_page, descendants.clone()).await?;
+        insert_layer(&self.db_pool, root_page, descendants.clone(), recently_scraped).await?;
 
         Ok((root, descendants.iter().map(|d| d.id).collect()))
     }
