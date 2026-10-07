@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: combi
+      POSTGRES_DB: combi
+      # dev only: matches the passwordless postgres://combi@localhost URL in .env
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "combi"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  dev:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # compile-time database for sqlx's query! macros
+      DATABASE_URL: postgres://combi@db/combi
+      # runtime database for the scraper
+      POSTGRES_URL: postgres://combi@db/combi
+      CARGO_TARGET_DIR: /target
+    volumes:
+      - .:/workspace
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target:/target
+    stdin_open: true
+    tty: true
+
+volumes:
+  pgdata:
+  cargo-registry:
+  cargo-git:
+  target:
