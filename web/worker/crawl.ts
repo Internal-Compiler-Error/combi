@@ -192,7 +192,8 @@ export async function crawl(sql: postgres.Sql, id: number, fetchPage: FetchPage 
 
   const students = byId(page.students.filter((s) => s.id !== id));
   const advisors = byId(page.advisors.filter((a) => a.id !== id));
-  const schools = unique([page.school, ...students.map((s) => s.school)].filter((s): s is string => s !== null));
+  // rows go in sorted, so crawls running side by side take their locks in the same order
+  const schools = unique([page.school, ...students.map((s) => s.school)].filter((s): s is string => s !== null)).sort();
 
   await sql.begin(async (tx) => {
     if (page.country) await tx`insert into countries (name) values (${page.country}) on conflict do nothing`;
@@ -211,9 +212,11 @@ export async function crawl(sql: postgres.Sql, id: number, fetchPage: FetchPage 
       ...students.map((s) => ({ id: s.id, name: s.name, graduating_year: s.year, school: s.school })),
       ...advisors.filter((a) => !students.some((s) => s.id === a.id)).map((a) => ({ id: a.id, name: a.name, graduating_year: null, school: null })),
     ];
+    stubs.sort((a, b) => a.id - b.id);
     if (stubs.length) await tx`insert into mathematicians ${tx(stubs)} on conflict (id) do nothing`;
 
     const relations = [...advisors.map((a) => ({ advisor: a.id, advisee: id })), ...students.map((s) => ({ advisor: id, advisee: s.id }))];
+    relations.sort((a, b) => a.advisor - b.advisor || a.advisee - b.advisee);
     if (relations.length) await tx`insert into advisor_relations ${tx(relations)} on conflict do nothing`;
 
     await tx`insert into scrape_logs (date, page_scraped, result) values (${now}, ${id}, 'success')`;

@@ -1,8 +1,8 @@
 import postgres from "postgres";
 import { createApp } from "./app";
-import { walkStep, type WalkMessage } from "./walk";
+import { PARALLEL, walkStep, type WalkMessage } from "./walk";
 
-/** between steps of a walk, so MGP sees at most STEP_FETCHES requests every few seconds */
+/** between steps of a walk, so MGP gets a breather every STEP_FETCHES pages */
 const STEP_PAUSE_S = 3;
 /** after MGP couldn't be reached */
 const RETRY_PAUSE_S = 60;
@@ -16,7 +16,7 @@ export default {
   fetch: app.fetch,
 
   async queue(batch, env) {
-    const sql = postgres(env.HYPERDRIVE.connectionString, { max: 1, fetch_types: false });
+    const sql = postgres(env.HYPERDRIVE.connectionString, { max: PARALLEL, fetch_types: false });
     try {
       for (const message of batch.messages) {
         const next = await walkStep(sql, message.body.walk);
