@@ -46,6 +46,14 @@ struct Args {
     #[clap(short, long, default_value = "256")]
     concurrency: usize,
 
+    /// the first root ID to crawl from
+    #[clap(short, long, default_value = "6448")]
+    start: i32,
+
+    /// the last root ID to crawl from (inclusive), defaults to `start`
+    #[clap(short, long)]
+    end: Option<i32>,
+
     // #[clap(long, default_value = "48h")]
     // refresh_tolerance: Duration,
 }
@@ -346,6 +354,10 @@ impl Scraper {
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     let args = Args::parse();
+    let end = args.end.unwrap_or(args.start);
+    if end < args.start {
+        return Err(eyre!("--end ({end}) must not be less than --start ({})", args.start));
+    }
 
     tracing_subscriber::fmt::fmt()
         .with_max_level(tracing::Level::INFO)
@@ -372,7 +384,7 @@ async fn main() -> color_eyre::Result<()> {
 
     let mut tasks = vec![];
 
-    for id in 6448..=6448 {
+    for id in args.start..=end {
         let id = parser::Id(id);
         let scraper = Arc::clone(&scraper);
 
