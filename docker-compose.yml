@@ -1,12 +1,11 @@
 # `docker compose up` starts everything needed to work on the site:
-#   web     http://localhost:5173  Vite dev server with hot reload, proxies /api to `server`
-#   server  http://localhost:3000  JSON API, restarted by watchexec on Rust changes
-#   db      localhost:5432         Postgres (user combi, no password)
-# Run the scraper or anything else with: docker compose run --rm dev <command>
+#   web  http://localhost:5173  Vite + the API worker in the Workers runtime, both hot-reloading
+#   db   localhost:5432         Postgres (user combi, no password needed)
+# Run the scraper or anything else Rust with: docker compose run --rm dev <command>
 
 x-rust: &rust
   build: .
-  environment: &rust-env
+  environment:
     # compile-time database for sqlx's query! macros, and the runtime database
     DATABASE_URL: postgres://combi@db/combi
   volumes:
@@ -40,40 +39,28 @@ services:
       db:
         condition: service_healthy
 
-  server:
-    <<: *rust
-    command: watchexec --restart --watch crates --watch Cargo.toml --exts rs,toml,sql -- cargo run -p combi-server
-    environment:
-      <<: *rust-env
-      # separate from `dev` so the two never wait on each other's cargo lock
-      CARGO_TARGET_DIR: /target/server
-      RUST_LOG: info,tower_http=debug
-    ports:
-      - "3000:3000"
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-
   web:
     image: node:22-bookworm-slim
     working_dir: /workspace/web
     command: sh -c "npm ci && npm run dev"
     environment:
-      API_URL: http://server:3000
+      # the worker's Hyperdrive binding connects here instead of localhost (see wrangler.jsonc)
+      CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: postgres://combi:combi@db:5432/combi
     volumes:
       - .:/workspace
       - web-node-modules:/workspace/web/node_modules
     ports:
       - "5173:5173"
     depends_on:
-      - server
+      migrate:
+        condition: service_completed_successfully
 
-  # a shell with the toolchain; not started by `up`
+  # a shell with the Rust toolchain; not started by `up`
   dev:
     <<: *rust
     profiles: [tools]
     environment:
-      <<: *rust-env
+      DATABASE_URL: postgres://combi@db/combi
       CARGO_TARGET_DIR: /target/dev
     depends_on:
       db:

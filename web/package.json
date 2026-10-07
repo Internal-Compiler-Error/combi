@@ -4,10 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.worker.json && tsc -p tsconfig.node.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "preview": "vite preview",
-    "gen:types": "cd .. && cargo test -p combi-server --lib export_bindings"
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.1",
@@ -17,11 +19,15 @@
     "d3-shape": "^3.2.0",
     "d3-transition": "^3.0.1",
     "d3-zoom": "^3.0.0",
+    "hono": "^4.13.13",
+    "postgres": "^3.4.9",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router": "^8.4.0"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.63.0",
+    "@cloudflare/workers-types": "^5.20261007.1",
     "@types/d3-hierarchy": "^3.1.7",
     "@types/d3-scale": "^4.0.9",
     "@types/d3-selection": "^3.0.12",
@@ -33,6 +39,8 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "typescript": "^7.0.2",
-    "vite": "^8.3.3"
+    "vite": "^8.3.3",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.148.0"
   }
 }

@@ -1,13 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { cloudflare } from "@cloudflare/vite-plugin";
 
-// In development the API runs separately (`cargo run -p combi-server`, or the `server` compose
-// service); Vite proxies /api to it so the browser sees a single origin.
+// `vite dev` runs the API worker (worker/) in the real Workers runtime next to the web app,
+// so one dev server serves both with hot reload. `vite build` emits the app and the worker.
 export default defineConfig({
-  plugins: [react()],
-  server: {
-    host: true,
-    port: 5173,
-    proxy: { "/api": process.env.API_URL ?? "http://localhost:3000" },
-  },
+  plugins: [react(), cloudflare()],
+  server: { host: true, port: 5173 },
 });

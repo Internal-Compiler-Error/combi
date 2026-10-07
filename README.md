@@ -2,21 +2,18 @@
 
 Crawls the [Mathematics Genealogy Project](https://www.mathgenealogy.org) into Postgres and
 serves a website to search every mathematician in the database and explore their advisors
-and students.
+and students. The site runs on Cloudflare Workers.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `crates/scraper` | `combi-scraper`: walks the site breadth-first from one or more IDs and stores what it finds |
-| `crates/server` | `combi-server`: JSON API under `/api`; in production it also serves the built web app |
-| `web/` | The website: Vite, React, TypeScript, TanStack Query, d3 for the radial family tree |
-| `migrations/` | Database schema, shared by both crates (`sqlx migrate`) |
-| `.sqlx/` | Offline query metadata, so the crates build without a running database |
-
-The API's response types are Rust structs that derive `ts_rs::TS`. Running the server's
-tests writes the matching TypeScript to `web/src/api/types/`, so the web app's types always
-match the API. Never edit those files by hand.
+| `crates/scraper` | `combi-scraper` (Rust): walks the site breadth-first from one or more IDs and stores what it finds |
+| `migrations/` | Database schema (`sqlx migrate`) |
+| `.sqlx/` | Offline query metadata, so the scraper builds without a running database |
+| `web/src` | The website: Vite, React, TypeScript, TanStack Query, d3 for the radial family tree |
+| `web/worker` | The API: a Cloudflare Worker (Hono + postgres.js) serving `/api/*`, reaching Postgres through Hyperdrive |
+| `web/shared` | Types used by both the API and the website |
 
 ## Develop
 
@@ -28,12 +25,10 @@ docker compose up
 
 | Service | URL | Notes |
 |---|---|---|
-| `web` | http://localhost:5173 | Vite dev server with hot reload; proxies `/api` to `server` |
-| `server` | http://localhost:3000 | Rebuilt and restarted by watchexec when Rust files change |
+| `web` | http://localhost:5173 | Vite with the API worker running inside it in the real Workers runtime; both hot-reload |
 | `db` | `postgres://combi@localhost:5432/combi` | Data persists in the `pgdata` volume |
 
-`migrate` runs `sqlx migrate run` before the server starts. The first start compiles the
-server from scratch and takes a few minutes; later restarts are incremental.
+`migrate` runs `sqlx migrate run` before the site starts.
 
 ### Fill the database
 
@@ -49,31 +44,31 @@ Pages fetched successfully in the last 24 hours are skipped.
 
 ### Common tasks
 
-All of these run in the `dev` container (`docker compose run --rm dev <command>`), or on your
-machine if you have Rust and Node installed and the `db` service running.
-
 | Task | Command |
 |---|---|
-| Run every Rust test, and regenerate the TypeScript types | `cargo test --workspace` |
-| Add a migration | `sqlx migrate add -r <name>` |
-| Refresh `.sqlx/` after changing a query | `cargo sqlx prepare --workspace` |
-| Typecheck the web app | `npm --prefix web run typecheck` |
-| Production build of the web app | `npm --prefix web run build` |
+| API tests (needs `db` running) | `npm --prefix web test` |
+| Typecheck the site, the worker and the configs | `npm --prefix web run typecheck` |
+| Scraper tests | `docker compose run --rm dev cargo test --workspace` |
+| Add a migration | `docker compose run --rm dev sqlx migrate add -r <name>` |
+| Refresh `.sqlx/` after changing a scraper query | `docker compose run --rm dev cargo sqlx prepare --workspace` |
 
-The API tests use `#[sqlx::test]`, which creates a throwaway database per test, applies
-every migration and loads `crates/server/tests/fixtures/family.sql`.
+The API tests create a throwaway database, apply every migration, load
+`web/worker/test/fixtures/family.sql` and drop the database afterwards. They connect as
+`TEST_DATABASE_URL`, falling back to `DATABASE_URL` and then the local dev database.
 
 ### Without Docker
 
-With Postgres reachable at the `DATABASE_URL` in `.env`:
+With Postgres running and reachable at `postgres://combi@localhost:5432/combi`:
 
 ```sh
 cargo install sqlx-cli --no-default-features --features rustls,postgres
 sqlx migrate run
-cargo run -p combi-server        # http://localhost:3000
 npm --prefix web install
 npm --prefix web run dev         # http://localhost:5173
 ```
+
+To use a different database in development, set
+`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE`.
 
 ## API
 
@@ -87,13 +82,16 @@ npm --prefix web run dev         # http://localhost:5173
 
 ## Deploy
 
-Build the web app, then run the server with `STATIC_DIR` pointing at it. The server answers
-`/api/*` itself and serves the app for every other path.
+The site and API deploy together as one Worker. Postgres has to be hosted somewhere the
+Worker can reach (for example Neon or Supabase) and must allow the `unaccent` and `pg_trgm`
+extensions.
 
-```sh
-npm --prefix web ci && npm --prefix web run build
-cargo build --release -p combi-server
-DATABASE_URL=postgres://… STATIC_DIR=web/dist ./target/release/combi-server
-```
-
-`LISTEN_ADDR` (default `0.0.0.0:3000`) and `RUST_LOG` are also read.
+1. Apply the migrations to the hosted database: `DATABASE_URL=postgres://… sqlx migrate run`
+2. Create a Hyperdrive config for it, and paste the ID it prints into `web/wrangler.jsonc`:
+   ```sh
+   cd web
+   npx wrangler hyperdrive create combi --connection-string="postgres://user:password@host:5432/db"
+   ```
+3. Deploy: `npm run deploy`
+4. Crawl into the hosted database by pointing the scraper at it:
+   `DATABASE_URL=postgres://… cargo run -p combi-scraper -- --start 10416`

@@ -1,13 +1,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { Graph } from "./types/Graph";
-import type { GraphParams } from "./types/GraphParams";
-import type { Person } from "./types/Person";
-import type { PersonDetail } from "./types/PersonDetail";
-import type { Stats } from "./types/Stats";
+import type { ApiErrorBody, Graph, GraphParams, Person, PersonDetail, Stats } from "../../shared/types";
 
-export type { Graph, GraphNode, GraphLink, Person, PersonDetail, Stats };
-import type { GraphLink } from "./types/GraphLink";
-import type { GraphNode } from "./types/GraphNode";
+export type { Graph, GraphNode, GraphLink, Person, PersonDetail, Stats } from "../../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -23,10 +17,10 @@ async function get<T>(path: string, params?: Record<string, string | number | un
   for (const [k, v] of Object.entries(params ?? {})) if (v !== undefined) url.searchParams.set(k, String(v));
   const res = await fetch(url);
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
+    const body = (await res.json().catch(() => null)) as ApiErrorBody | null;
     throw new ApiError(body?.error ?? `Request failed (${res.status})`, res.status);
   }
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 export const useStats = () => useQuery({ queryKey: ["stats"], queryFn: () => get<Stats>("/stats") });

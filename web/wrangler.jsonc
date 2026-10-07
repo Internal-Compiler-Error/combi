@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "combi",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // The built web app. /api/* goes to the worker; any other unknown path gets index.html so
+  // client-side routes like /m/10416 work on reload.
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      // Replace with the ID printed by `npx wrangler hyperdrive create combi --connection-string=...`
+      "id": "00000000000000000000000000000000",
+      // Used by `npm run dev`; override with CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE.
+      // Hyperdrive requires a password here; the dev database trusts local connections, so any works.
+      "localConnectionString": "postgres://combi:combi@localhost:5432/combi"
+    }
+  ],
+  "observability": { "enabled": true }
+}
