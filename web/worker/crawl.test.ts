@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, inject, test, vi } from "vitest";
-import type { CrawlResult, PersonDetail } from "../shared/types";
+import type { CrawlResult, MgpHit, PersonDetail } from "../shared/types";
 import { createApp } from "./app";
-import { parsePage } from "./crawl";
+import { mgpQuery, parsePage, parseSearchResults, type MgpQuery } from "./crawl";
 
 const fixture = (name: string) => readFileSync(join(import.meta.dirname, "test/fixtures/mgp", `${name}.html`), "utf8");
 const pages: Record<number, string> = { 10416: fixture("knuth"), 135101: fixture("rajesh") };
@@ -57,9 +57,26 @@ describe("parsePage", () => {
   test("an ID MGP doesn't have", () => expect(parsePage(1, missing)).toBeNull());
 });
 
+describe("MGP search", () => {
+  test("parses the results page", () => {
+    const hits = parseSearchResults(fixture("search-knuth"));
+    expect(hits.map((h) => h.id)).toEqual([10416, 116483, 294297, 199949, 217934, 63323]);
+    expect(hits[0]).toEqual({ id: 10416, name: "Donald Knuth", school: "California Institute of Technology", year: 1963 });
+    expect(hits[2]).toEqual({ id: 294297, name: "Eric Knuth", school: null, year: null });
+    expect(hits[3]!.school).toBe("Georg-August-Universität Göttingen");
+  });
+
+  test("splits a query into given and family names", () => {
+    expect(mgpQuery("knuth")).toEqual({ family_name: "knuth" });
+    expect(mgpQuery(" donald  ervin knuth ")).toEqual({ given_name: "donald", family_name: "knuth" });
+    expect(mgpQuery("  ")).toBeNull();
+  });
+});
+
 describe("crawl", () => {
   const fetchPage = vi.fn(async (id: number) => pages[id] ?? missing);
-  const app = createApp({ fetchPage });
+  const fetchSearch = vi.fn(async (_: MgpQuery) => fixture("search-knuth"));
+  const app = createApp({ fetchPage, fetchSearch });
   const env = { HYPERDRIVE: { connectionString: inject("emptyDatabaseUrl") } };
   const post = (id: number) => app.request(`/api/mathematicians/${id}/crawl`, { method: "POST" }, env);
   const person = async (id: number) => (await app.request(`/api/mathematicians/${id}`, {}, env)).json() as Promise<PersonDetail>;
@@ -98,6 +115,15 @@ describe("crawl", () => {
     fetchPage.mockClear();
     expect((await post(999_999)).status).toBe(404);
     expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  test("MGP search marks who is in the database", async () => {
+    // runs after Knuth's crawl above, which stored him but none of the other Knuths
+    const res = await app.request("/api/mgp/search?q=knuth", {}, env);
+    const hits = (await res.json()) as MgpHit[];
+    expect(fetchSearch).toHaveBeenCalledWith({ family_name: "knuth" });
+    expect(hits.find((h) => h.id === 10416)).toMatchObject({ known: true, last_crawled: expect.any(String) });
+    expect(hits.find((h) => h.id === 116483)).toMatchObject({ known: false, last_crawled: null });
   });
 
   test("rejects IDs out of range", async () => expect((await post(0)).status).toBe(400));

@@ -1,6 +1,6 @@
 interface Env {
   /** Postgres via Hyperdrive in production; `localConnectionString` in wrangler.jsonc in development */
   HYPERDRIVE: { connectionString: string };
-  /** caps crawl requests per visitor; absent in tests */
-  CRAWL_LIMITER?: RateLimit;
+  /** caps requests that reach MGP (crawls and MGP searches) per visitor; absent in tests */
+  MGP_LIMITER?: RateLimit;
 }

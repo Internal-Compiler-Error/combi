@@ -90,13 +90,15 @@ export function SearchBox({ className = "", autoFocus = false, large = false }: 
             </li>
           ))}
           {!hits.length && !isFetching && <li className="s-empty">No one in the database matches “{q}”.</li>}
-          {hits.length > 0 && (
-            <li>
-              <button type="button" className="s-all" onClick={() => go(`/search?q=${encodeURIComponent(text.trim())}`)}>
-                See all results for “{text.trim()}”
-              </button>
-            </li>
-          )}
+          <li>
+            <button type="button" className="s-all" onClick={() => go(`/search?q=${encodeURIComponent(text.trim())}`)}>
+              {hits.length
+                ? `See all results for “${text.trim()}”`
+                : /^\d+$/.test(q)
+                  ? `Crawl MGP ID ${q}`
+                  : `Search the Mathematics Genealogy Project for “${q}”`}
+            </button>
+          </li>
         </ul>
       )}
     </div>

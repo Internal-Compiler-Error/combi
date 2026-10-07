@@ -30,8 +30,10 @@ docker compose up
 
 ### Fill the database
 
-The site is empty until something is crawled. Open any person, for example
-http://localhost:5173/m/10416 for Donald Knuth, and press **Crawl this page**. A crawl
+The site is empty until something is crawled. Search for anyone: a name with no matches here
+is looked up on MGP's own search, and every MGP result has a **Crawl** button (searching an MGP
+ID offers to crawl it directly). Or open someone, for example http://localhost:5173/m/10416
+for Donald Knuth, and press **Crawl this page**. A crawl
 fetches that one MGP page and stores the person along with their advisors and students as
 listed there; those people get their own crawl button until their pages are crawled too.
 
@@ -78,6 +80,7 @@ To use a different database in development, set
 | `GET /api/mathematicians/{id}` | One person with their advisors, students and descendant count |
 | `GET /api/mathematicians/{id}/graph?up=&down=` | Their neighbourhood: `up` generations of advisors and `down` of students (0–6 each, capped at 1,500 people) |
 | `POST /api/mathematicians/{id}/crawl` | Fetches their MGP page into the database: `{"status": "crawled"}`, or `"fresh"` without fetching when it was crawled in the last 14 days. 404 when MGP has no such ID, 429 past the rate limit |
+| `GET /api/mgp/search?q=` | MGP's own search, marking who is already in the database. One word is a family name; with more, the first is the given name and the last the family name. Shares the crawl rate limit |
 | `GET /api/stats` | Counts for the whole database |
 | `GET /api/notable` | The 12 people with the most students on record |
 
@@ -100,4 +103,4 @@ cache is off (`--caching-disabled`) so a crawl shows up immediately.
    ```
 3. Deploy: `npm run deploy`
 4. Crawl from the live site. The deployed Worker allows each visitor 10 crawls a minute
-   (`CRAWL_LIMITER` in `web/wrangler.jsonc`).
+   (`MGP_LIMITER` in `web/wrangler.jsonc`, shared with MGP searches).

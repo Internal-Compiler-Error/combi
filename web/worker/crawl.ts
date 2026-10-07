@@ -19,6 +19,9 @@ export type MgpPage = {
 };
 
 export type FetchPage = (id: number) => Promise<string>;
+/** Runs a search on MGP and returns the results page */
+export type FetchSearch = (query: MgpQuery) => Promise<string>;
+export type MgpQuery = { given_name?: string; family_name: string };
 
 export class MgpNotFound extends Error {}
 export class UpstreamError extends Error {}
@@ -39,6 +42,16 @@ function hrefId(a: HTMLElement): number | null {
 function unsurname(listed: string): string {
   const [surname = "", ...rest] = listed.split(",").map(squash);
   return rest.length ? [...rest, surname].join(" ") : surname;
+}
+
+/** Student tables and search results share a row layout: linked name, school, year. */
+function parseListedPerson(row: HTMLElement): Student | null {
+  const [nameCell, schoolCell, yearCell] = row.querySelectorAll("td");
+  const a = nameCell?.querySelector("a");
+  const id = a && hrefId(a);
+  if (!a || id == null) return null;
+  const year = Number(yearCell?.text.trim() || NaN);
+  return { id, name: unsurname(a.text), school: orNull(schoolCell?.text), year: Number.isInteger(year) ? year : null };
 }
 
 /** Returns null when MGP has no one with this ID. */
@@ -62,16 +75,8 @@ export function parsePage(id: number, html: string): MgpPage | null {
     }
   }
 
-  const students: Student[] = [];
-  // the first row is the header
-  for (const row of doc.querySelector("table")?.querySelectorAll("tr").slice(1) ?? []) {
-    const [nameCell, schoolCell, yearCell] = row.querySelectorAll("td");
-    const a = nameCell?.querySelector("a");
-    const student = a && hrefId(a);
-    if (!a || student == null) continue;
-    const year = Number(yearCell?.text.trim() || NaN);
-    students.push({ id: student, name: unsurname(a.text), school: orNull(schoolCell?.text), year: Number.isInteger(year) ? year : null });
-  }
+  // the header row has no cells, so it drops out
+  const students = (doc.querySelector("table")?.querySelectorAll("tr") ?? []).map(parseListedPerson).filter((s) => s !== null);
 
   return {
     id,
@@ -85,16 +90,41 @@ export function parsePage(id: number, html: string): MgpPage | null {
   };
 }
 
-export const fetchMgpPage: FetchPage = async (id) => {
+async function mgpFetch(url: string, init: RequestInit = {}): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(mgpUrl(id), { headers: { "user-agent": "combi-crawler" } });
+    res = await fetch(url, { ...init, headers: { "user-agent": "combi-crawler", ...init.headers } });
   } catch (e) {
     throw new UpstreamError(`Could not reach the Mathematics Genealogy Project: ${e}`);
   }
-  if (!res.ok) throw new UpstreamError(`The Mathematics Genealogy Project answered ${res.status}`);
-  return res.text();
+  if (!res.ok && init.redirect !== "manual") throw new UpstreamError(`The Mathematics Genealogy Project answered ${res.status}`);
+  return res;
+}
+
+export const fetchMgpPage: FetchPage = async (id) => (await mgpFetch(mgpUrl(id))).text();
+
+/** MGP's search form posts the query, then redirects to a results page tied to a PHP session. */
+export const fetchMgpSearch: FetchSearch = async (query) => {
+  const posted = await mgpFetch("https://www.mathgenealogy.org/query-prep.php", {
+    method: "POST",
+    body: new URLSearchParams({ chrono: "0", given_name: "", other_names: "", school: "", year: "", thesis: "", country: "", msc: "", ...query }),
+    redirect: "manual",
+  });
+  const results = posted.headers.get("location");
+  if (posted.status !== 302 || !results) throw new UpstreamError(`The Mathematics Genealogy Project's search answered ${posted.status}`);
+  const session = posted.headers.get("set-cookie")?.split(";")[0];
+  return (await mgpFetch(new URL(results, "https://www.mathgenealogy.org/").toString(), { headers: session ? { cookie: session } : {} })).text();
 };
+
+/** One word searches family names; more searches the first as a given name and the last as the family name. */
+export function mgpQuery(q: string): MgpQuery | null {
+  const words = q.split(/\s+/).filter(Boolean);
+  if (!words.length) return null;
+  return words.length === 1 ? { family_name: words[0]! } : { given_name: words[0]!, family_name: words.at(-1)! };
+}
+
+export const parseSearchResults = (html: string): Student[] =>
+  parse(html).querySelectorAll("#mainContent tr").map(parseListedPerson).filter((s) => s !== null);
 
 const unique = <T>(xs: T[]) => [...new Set(xs)];
 const byId = <T extends Ref>(xs: T[]) => [...new Map(xs.map((x) => [x.id, x])).values()];

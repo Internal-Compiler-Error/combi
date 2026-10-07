@@ -69,7 +69,8 @@ export function HomePage() {
       )}
       {s && s.mathematicians === 0 && (
         <p className="muted">
-          The database is empty. Run the scraper, for example <code>cargo run -p combi-scraper -- --start 10416</code>.
+          The database is empty. Search for anyone above to find them on the Mathematics Genealogy Project and crawl
+          them, or start with <Link to="/m/10416">Donald Knuth</Link>.
         </p>
       )}
     </main>

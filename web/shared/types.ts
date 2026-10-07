@@ -60,6 +60,18 @@ export type Stats = {
   last_scraped: string | null;
 };
 
+/** One match from the Mathematics Genealogy Project's own search, whether or not we have them. */
+export type MgpHit = {
+  id: number;
+  name: string;
+  school: string | null;
+  year: number | null;
+  /** whether they are in our database at all, even if only as someone's advisor or student */
+  known: boolean;
+  /** when their own page was last crawled, as in PersonDetail */
+  last_crawled: string | null;
+};
+
 export type ApiErrorBody = { error: string };
 
 export const MAX_GRAPH_DEPTH = 6;

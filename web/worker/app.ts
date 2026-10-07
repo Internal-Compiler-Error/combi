@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import postgres from "postgres";
-import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, type ApiErrorBody, type CrawlResult, type Graph, type GraphLink, type Person, type PersonDetail, type Stats } from "../shared/types";
-import { crawl, fetchMgpPage, MgpNotFound, UpstreamError, type FetchPage } from "./crawl";
+import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, type ApiErrorBody, type CrawlResult, type Graph, type MgpHit, type GraphLink, type Person, type PersonDetail, type Stats } from "../shared/types";
+import { crawl, fetchMgpPage, fetchMgpSearch, mgpQuery, MgpNotFound, parseSearchResults, UpstreamError, type FetchPage, type FetchSearch } from "./crawl";
 
 type Sql = postgres.Sql;
 type Vars = { sql: Sql };
@@ -49,7 +49,13 @@ const personColumns = (sql: Sql | postgres.TransactionSql) => sql`
   (select string_agg(country, ', ' order by country) from school_locations l where l.school = m.school) as country,
   (select count(*)::int from advisor_relations sc where sc.advisor = m.id) as student_count`;
 
-export function createApp({ fetchPage = fetchMgpPage }: { fetchPage?: FetchPage } = {}) {
+/** Requests that reach MGP, a volunteer-run site, are capped per visitor. */
+async function withinMgpLimit(env: Env, ip: string | undefined): Promise<boolean> {
+  const outcome = await env.MGP_LIMITER?.limit({ key: ip ?? "unknown" });
+  return outcome?.success ?? true;
+}
+
+export function createApp({ fetchPage = fetchMgpPage, fetchSearch = fetchMgpSearch }: { fetchPage?: FetchPage; fetchSearch?: FetchSearch } = {}) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath("/api");
 
   // One small connection pool per request: Hyperdrive does the real pooling at the edge.
@@ -150,11 +156,30 @@ export function createApp({ fetchPage = fetchMgpPage }: { fetchPage?: FetchPage 
     const id = Number(c.req.param("id"));
     if (id < 1 || id > 2 ** 31 - 1) return c.json<ApiErrorBody>({ error: "Not a valid MGP ID" }, 400);
 
-    // every crawl that isn't fresh fetches from MGP, a volunteer-run site
-    const limited = await c.env.CRAWL_LIMITER?.limit({ key: c.req.header("cf-connecting-ip") ?? "unknown" });
-    if (limited && !limited.success) return c.json<ApiErrorBody>({ error: "Too many crawls; try again in a minute" }, 429);
-
+    if (!(await withinMgpLimit(c.env, c.req.header("cf-connecting-ip")))) return c.json<ApiErrorBody>({ error: "Too many requests to MGP; try again in a minute" }, 429);
     return c.json<CrawlResult>(await crawl(c.var.sql, id, fetchPage));
+  });
+
+  /** MGP's own search, for people we haven't crawled; each hit says whether we already have them. */
+  app.get("/mgp/search", async (c) => {
+    const query = mgpQuery(c.req.query("q") ?? "");
+    if (!query) return c.json<MgpHit[]>([]);
+    if (!(await withinMgpLimit(c.env, c.req.header("cf-connecting-ip")))) return c.json<ApiErrorBody>({ error: "Too many requests to MGP; try again in a minute" }, 429);
+
+    const hits = parseSearchResults(await fetchSearch(query)).slice(0, 100);
+    if (!hits.length) return c.json<MgpHit[]>([]);
+    // an array literal, as in the graph query: these are integers parsed from MGP's links
+    const ids = `{${hits.map((h) => h.id).join(",")}}`;
+    const known = await c.var.sql<{ id: number; last_crawled: Date | null }[]>`
+      select m.id, (select max(date) from scrape_logs where page_scraped = m.id and result = 'success') as last_crawled
+      from mathematicians m where m.id = any(${ids}::int[])`;
+    const byId = new Map(known.map((k) => [k.id, k.last_crawled]));
+    return c.json<MgpHit[]>(
+      hits.map((h) => {
+        const lastCrawled = byId.get(h.id);
+        return { ...h, known: byId.has(h.id), last_crawled: lastCrawled ? new Date(lastCrawled).toISOString() : null };
+      }),
+    );
   });
 
   app.get("/mathematicians/:id{[0-9]+}/graph", async (c) => {

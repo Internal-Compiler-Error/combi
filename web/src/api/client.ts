@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ApiErrorBody, CrawlResult, Graph, GraphParams, Person, PersonDetail, Stats } from "../../shared/types";
+import type { ApiErrorBody, CrawlResult, Graph, GraphParams, MgpHit, Person, PersonDetail, Stats } from "../../shared/types";
 
-export type { CrawlResult, Graph, GraphNode, GraphLink, Person, PersonDetail, Stats } from "../../shared/types";
+export type { CrawlResult, Graph, GraphNode, GraphLink, MgpHit, Person, PersonDetail, Stats } from "../../shared/types";
 export { mgpUrl, RECRAWL_AFTER_DAYS } from "../../shared/types";
 
 export class ApiError extends Error {
@@ -37,6 +37,11 @@ export const useSearch = (q: string, limit = 8) =>
     enabled: q.trim().length > 0,
     placeholderData: keepPreviousData,
   });
+
+/** Searches MGP itself, which can reach people we have never crawled. Off until `enabled`, since
+ * every search is a request to MGP. */
+export const useMgpSearch = (q: string, enabled: boolean) =>
+  useQuery({ queryKey: ["mgp-search", q], queryFn: () => get<MgpHit[]>("/mgp/search", { q }), enabled: enabled && q.trim().length > 0 });
 
 export const usePerson = (id: number) =>
   useQuery({ queryKey: ["person", id], queryFn: () => get<PersonDetail>(`/mathematicians/${id}`) });
