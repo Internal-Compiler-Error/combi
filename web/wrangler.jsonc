@@ -13,7 +13,9 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      // Points at the `combi` Neon project's main branch (direct, unpooled endpoint)
+      // Points at the `combi` Neon project's main branch (direct, unpooled endpoint). Its query cache is
+      // disabled: crawls change the data, and a cached read would hide a crawl for up to a minute
+      // and let the same page be fetched twice.
       "id": "36c14748c0aa49f3a88aaec5498dcdcc",
       // Used by `npm run dev`; override with CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE.
       // Hyperdrive requires a password here; the dev database trusts local connections, so any works.

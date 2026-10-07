@@ -86,7 +86,8 @@ To use a different database in development, set
 The site and API deploy together as one Worker; pushes to `main` deploy through the
 Cloudflare GitHub integration, which runs `npm run build` and `npx wrangler deploy` in `web/`. Postgres is the `combi` Neon project (linked in the gitignored
 `.neon`), reached through the `combi` Hyperdrive config whose ID is in `web/wrangler.jsonc`.
-Hyperdrive pools connections itself, so it uses Neon's direct (unpooled) endpoint.
+Hyperdrive pools connections itself, so it uses Neon's direct (unpooled) endpoint. Its query
+cache is off (`--caching-disabled`) so a crawl shows up immediately.
 
 1. Apply the migrations to Neon. `neon connection-string` prints the direct URL:
    ```sh
