@@ -1,1 +1,5 @@
 /target
+.neon
+node_modules/
+# local secrets: `neon link` / `neon deploy` write database and storage credentials here
+.env
