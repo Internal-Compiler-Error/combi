@@ -1,3 +1,4 @@
 /target
 /.git
-*.html
+/web/node_modules
+/web/dist

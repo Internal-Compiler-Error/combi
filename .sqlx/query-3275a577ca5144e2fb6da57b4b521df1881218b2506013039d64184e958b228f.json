@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT advisor, advisee FROM advisor_relations WHERE advisor = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "advisor",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "advisor_relations",
+            "name": "advisor"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "advisee",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "advisor_relations",
+            "name": "advisee"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "3275a577ca5144e2fb6da57b4b521df1881218b2506013039d64184e958b228f"
+}

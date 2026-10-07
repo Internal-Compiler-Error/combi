@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select advisor, advisee as student\n        from advisor_relations\n        where advisor = any($1) and advisee = any($1)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "advisor",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "advisor_relations",
+            "name": "advisor"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "student",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "advisor_relations",
+            "name": "advisee"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "9855756c62f8041d2f0d9336324d9b5e0ae8fad342c4b7e735e4c42f7a70792d"
+}

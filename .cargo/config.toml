@@ -1,2 +1,6 @@
 [build]
 rustflags = ["--cfg", "tokio_unstable"]
+
+[env]
+# where `cargo test -p combi-server` writes the generated TypeScript API types
+TS_RS_EXPORT_DIR = { value = "web/src/api/types", relative = true }

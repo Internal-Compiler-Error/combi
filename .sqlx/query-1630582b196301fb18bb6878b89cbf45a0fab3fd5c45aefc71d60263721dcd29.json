@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select m.id, m.name, m.graduating_year as year, m.school,\n               (select string_agg(country, ', ' order by country) from school_locations l where l.school = m.school) as country,\n               c.n as student_count\n        from (select advisor, count(*)::int as n from advisor_relations group by advisor order by n desc, advisor limit 12) c\n        join mathematicians m on m.id = c.advisor\n        order by c.n desc, m.name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mathematicians",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mathematicians",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "year",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mathematicians",
+            "name": "graduating_year"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "school",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mathematicians",
+            "name": "school"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "country",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "student_count",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "1630582b196301fb18bb6878b89cbf45a0fab3fd5c45aefc71d60263721dcd29"
+}

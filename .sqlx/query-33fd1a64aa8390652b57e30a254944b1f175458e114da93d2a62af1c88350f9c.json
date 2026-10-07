@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with recursive\n        down(id, depth) as (\n            select $1::int, 0\n            union\n            select r.advisee, d.depth + 1 from advisor_relations r join down d on r.advisor = d.id where d.depth < $3\n        ),\n        up(id, depth) as (\n            select $1::int, 0\n            union\n            select r.advisor, u.depth - 1 from advisor_relations r join up u on r.advisee = u.id where u.depth > -($2::int)\n        ),\n        nearest as (\n            select id, (array_agg(depth order by abs(depth), depth))[1] as depth\n            from (select * from down union all select * from up) both_ways\n            group by id\n        )\n        select m.id, m.name, m.graduating_year as year, m.school,\n               (select string_agg(country, ', ' order by country) from school_locations l where l.school = m.school) as country,\n               (select count(*)::int from advisor_relations r where r.advisor = m.id) as student_count,\n               n.depth as \"depth!\"\n        from nearest n join mathematicians m on m.id = n.id\n        order by abs(n.depth), n.depth, m.graduating_year nulls last, m.id\n        limit $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mathematicians",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mathematicians",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "year",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mathematicians",
+            "name": "graduating_year"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "school",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mathematicians",
+            "name": "school"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "country",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "student_count",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "depth!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "33fd1a64aa8390652b57e30a254944b1f175458e114da93d2a62af1c88350f9c"
+}

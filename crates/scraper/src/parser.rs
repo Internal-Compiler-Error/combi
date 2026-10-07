@@ -233,7 +233,7 @@ mod test {
 
     #[test]
     fn parse_name_works_for_tai() {
-        let page = read("Tai-Yih.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/Tai-Yih.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
         let name = scrape_mathematician(&page).unwrap();
@@ -242,7 +242,7 @@ mod test {
 
     #[test]
     fn parse_year_works_for_knuth() {
-        let page = read("knuth.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/knuth.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
         let year = parse_year(&page).unwrap();
@@ -251,7 +251,7 @@ mod test {
 
     #[test]
     fn parse_year_works_for_rajesh() {
-        let page = read("rajesh.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rajesh.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
         let year = parse_year(&page).unwrap();
@@ -260,7 +260,7 @@ mod test {
 
     #[test]
     fn parse_country_works_for_knuth() {
-        let page = read("knuth.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/knuth.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
         let country = parse_country(&page).unwrap();
@@ -271,7 +271,7 @@ mod test {
 
     #[test]
     fn parse_country_works_for_rajesh() {
-        let page = read("rajesh.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rajesh.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
         let country = parse_country(&page).unwrap();
@@ -281,7 +281,7 @@ mod test {
 
     #[test]
     fn scrape_rajesh() {
-        let page = read("rajesh.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rajesh.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
         let rajesh = scrape(DUMMY_ID, &page).unwrap();
@@ -297,7 +297,7 @@ mod test {
 
     #[test]
     fn scrape_abu() {
-        let page = read("abu.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/abu.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
         let abu = scrape(DUMMY_ID, &page).unwrap();
@@ -308,7 +308,7 @@ mod test {
 
     #[test]
     fn scrape_rajesh_students() {
-        let page = read("rajesh.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rajesh.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
         let students = scrape_students(&page).unwrap();
@@ -347,7 +347,7 @@ mod test {
 
     #[test]
     fn scrape_knuth() {
-        let page = read("knuth.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/knuth.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
 
@@ -366,7 +366,7 @@ mod test {
 
     #[test]
     fn parse_uni_works_for_knuth() {
-        let page = read("knuth.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/knuth.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
 
@@ -376,7 +376,7 @@ mod test {
 
     #[test]
     fn parse_uni_works_for_rajesh() {
-        let page = read("rajesh.html").unwrap();
+        let page = read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rajesh.html")).unwrap();
         let page = String::from_utf8(page).unwrap();
         let page = Html::parse_document(&page);
 

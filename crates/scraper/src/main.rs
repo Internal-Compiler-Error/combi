@@ -377,7 +377,9 @@ async fn main() -> color_eyre::Result<()> {
 
     color_eyre::install()?;
 
-    let postgres_url = std::env::var(&"POSTGRES_URL").expect("POSTGRES_URL is not set");
+    let postgres_url = std::env::var("POSTGRES_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .expect("set DATABASE_URL (or POSTGRES_URL) to the Postgres connection string");
 
     let db_pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(12)

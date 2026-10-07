@@ -1,4 +1,4 @@
-# Development image: Rust toolchain + sqlx-cli + psql.
+# Development image: Rust toolchain + sqlx-cli + watchexec + psql.
 # The source tree is bind-mounted at /workspace by docker-compose.yml, so edits on
 # the host are picked up without rebuilding the image.
 FROM rust:1.97-bookworm
@@ -9,8 +9,10 @@ RUN apt-get update \
 
 RUN rustup component add rustfmt clippy
 
-# sqlx-cli runs the migrations; the query! macros also need a live database at compile time.
-RUN cargo install sqlx-cli --locked --no-default-features --features rustls,postgres
+# sqlx-cli runs migrations and refreshes the offline query data in .sqlx/;
+# watchexec restarts the API server when Rust sources change.
+RUN cargo install sqlx-cli --locked --no-default-features --features rustls,postgres \
+    && cargo install watchexec-cli --locked
 
 WORKDIR /workspace
 

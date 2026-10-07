@@ -1,3 +1,20 @@
+# `docker compose up` starts everything needed to work on the site:
+#   web     http://localhost:5173  Vite dev server with hot reload, proxies /api to `server`
+#   server  http://localhost:3000  JSON API, restarted by watchexec on Rust changes
+#   db      localhost:5432         Postgres (user combi, no password)
+# Run the scraper or anything else with: docker compose run --rm dev <command>
+
+x-rust: &rust
+  build: .
+  environment: &rust-env
+    # compile-time database for sqlx's query! macros, and the runtime database
+    DATABASE_URL: postgres://combi@db/combi
+  volumes:
+    - .:/workspace
+    - cargo-registry:/usr/local/cargo/registry
+    - cargo-git:/usr/local/cargo/git
+    - target:/target
+
 services:
   db:
     image: postgres:17
@@ -16,22 +33,51 @@ services:
       timeout: 5s
       retries: 15
 
-  dev:
-    build: .
+  migrate:
+    <<: *rust
+    command: sqlx migrate run
     depends_on:
       db:
         condition: service_healthy
+
+  server:
+    <<: *rust
+    command: watchexec --restart --watch crates --watch Cargo.toml --exts rs,toml,sql -- cargo run -p combi-server
     environment:
-      # compile-time database for sqlx's query! macros
-      DATABASE_URL: postgres://combi@db/combi
-      # runtime database for the scraper
-      POSTGRES_URL: postgres://combi@db/combi
-      CARGO_TARGET_DIR: /target
+      <<: *rust-env
+      # separate from `dev` so the two never wait on each other's cargo lock
+      CARGO_TARGET_DIR: /target/server
+      RUST_LOG: info,tower_http=debug
+    ports:
+      - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    image: node:22-bookworm-slim
+    working_dir: /workspace/web
+    command: sh -c "npm ci && npm run dev"
+    environment:
+      API_URL: http://server:3000
     volumes:
       - .:/workspace
-      - cargo-registry:/usr/local/cargo/registry
-      - cargo-git:/usr/local/cargo/git
-      - target:/target
+      - web-node-modules:/workspace/web/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+
+  # a shell with the toolchain; not started by `up`
+  dev:
+    <<: *rust
+    profiles: [tools]
+    environment:
+      <<: *rust-env
+      CARGO_TARGET_DIR: /target/dev
+    depends_on:
+      db:
+        condition: service_healthy
     stdin_open: true
     tty: true
 
@@ -40,3 +86,4 @@ volumes:
   cargo-registry:
   cargo-git:
   target:
+  web-node-modules:

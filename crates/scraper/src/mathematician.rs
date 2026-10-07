@@ -45,7 +45,7 @@ async fn mathematician_by_id<'e, E>(executor: E, id: Id) -> color_eyre::Result<O
 where
     E: Executor<'e, Database = Postgres>,
 {
-    sqlx::query_as!(Mathematician, "SELECT * FROM mathematicians WHERE id = $1", id.0)
+    sqlx::query_as!(Mathematician, "SELECT id, name, dissertation, graduating_year, school FROM mathematicians WHERE id = $1", id.0)
         .fetch_optional(executor)
         .await
         .map_err(Into::into)
