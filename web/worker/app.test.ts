@@ -22,6 +22,7 @@ describe("search", () => {
   test("skips middle names", async () => expect(await search("felix klein")).toEqual([4]));
   test("tolerates typos", async () => expect(await search("lipshitz")).toEqual([5]));
   test("ranks an exact ID first", async () => expect((await search("4"))[0]).toBe(4));
+  test("matches the start of names for a letter or two", async () => expect(await search("ku")).toEqual([6]));
   test("treats wildcards literally", async () => {
     expect(await search("%")).toEqual([]);
     expect(await search("   ")).toEqual([]);

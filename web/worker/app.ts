@@ -98,6 +98,23 @@ const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
 const crawledFields = (r: Crawled) => ({ last_crawled: iso(r.last_crawled), next_crawl: iso(r.next_crawl) });
 
 /** `fetchPage` and `fetchSearch` replace MGP itself (in tests); the real ones wait their turn in the MGP budget. */
+/**
+ * Matching a typed query against a lower-cased, accent-free name column, in a form the indexes can
+ * answer: words in order anywhere in the name ("donald knuth" finds "Donald Ervin Knuth") or close
+ * by trigram word similarity for typos ("knuht"), both via the trigram index. A query of one or two
+ * letters has no trigrams, so it matches the start of names through the prefix index instead.
+ */
+function nameMatch(sql: Sql, column: postgres.PendingQuery<postgres.Row[]>, q: string) {
+  const query = sql`lower(immutable_unaccent(${q}::text))`;
+  const words = sql`replace(${query}, ' ', '%')`;
+  const short = q.replace(/\s/g, "").length < 3;
+  return {
+    where: short ? sql`${column} like ${words} || '%'` : sql`(${column} like '%' || ${words} || '%' or ${query} <% ${column})`,
+    prefix: sql`${column} like ${words} || '%'`,
+    similarity: sql`word_similarity(${query}, ${column})`,
+  };
+}
+
 export function createApp({ fetchPage, fetchSearch }: { fetchPage?: FetchPage; fetchSearch?: FetchSearch } = {}) {
   const pageFetcher = (sql: Sql) => fetchPage ?? budgeted(sql, fetchMgpPage);
   const searchFetcher = (sql: Sql) => fetchSearch ?? budgetedSearch(sql, fetchMgpSearch);
@@ -133,27 +150,22 @@ export function createApp({ fetchPage, fetchSearch }: { fetchPage?: FetchPage; f
     const q = normalizeQuery(c.req.query("q") ?? "");
     if (!q) return c.json<Person[]>([]);
     const limit = clamp(intParam(c.req.query("limit"), 20), 1, 100);
+    const sql = c.var.sql;
+    const match = nameMatch(sql, sql`m.search_name`, q);
 
-    // Words must appear in order ("donald knuth" finds "Donald Ervin Knuth"); word similarity
-    // catches typos ("knuht"). An all-digit query also matches the MGP ID exactly.
-    // pg_trgm's default threshold of 0.6 misses one-letter typos in short names, so loosen it
-    // for this transaction only.
-    const rows = await c.var.sql.begin(async (tx) => {
-      await tx`set local pg_trgm.word_similarity_threshold = 0.45`;
-      return tx<PersonRow[]>`
-        with q as (select lower(immutable_unaccent(${q})) as q)
-        select ${personColumns(tx)}
-        from mathematicians m, q
-        where m.search_name like '%' || replace(q.q, ' ', '%') || '%'
-           or q.q <% m.search_name
-           or m.id::text = ${q}
-        order by m.id::text = ${q} desc,
-                 m.search_name like replace(q.q, ' ', '%') || '%' desc,
-                 word_similarity(q.q, m.search_name) desc,
-                 student_count desc,
-                 m.name
-        limit ${limit}`;
-    });
+    // An all-digit query also matches the MGP ID; looked up on its own, since OR-ing it into the
+    // name match would stop Postgres using the trigram index and make it read every row.
+    const id = /^\d+$/.test(q) && Number(q) < 2 ** 31 ? Number(q) : null;
+    const [exact, named] = await Promise.all([
+      id === null ? [] : sql<PersonRow[]>`select ${personColumns(sql)} from mathematicians m where m.id = ${id}`,
+      sql<PersonRow[]>`
+        select ${personColumns(sql)}
+        from mathematicians m
+        where ${match.where}
+        order by ${match.prefix} desc, ${match.similarity} desc, student_count desc, m.name
+        limit ${limit}`,
+    ]);
+    const rows = [...exact, ...named.filter((r) => r.id !== id)].slice(0, limit);
     return c.json<Person[]>(rows.map(toPerson));
   });
 
@@ -371,21 +383,16 @@ export function createApp({ fetchPage, fetchSearch }: { fetchPage?: FetchPage; f
     const q = normalizeQuery(c.req.query("q") ?? "");
     if (!q) return c.json<SchoolHit[]>([]);
     const limit = clamp(intParam(c.req.query("limit"), 8), 1, 50);
-    // the same matching as people's names, against the school's lower-cased, accent-free name
-    const rows = await c.var.sql.begin(async (tx) => {
-      await tx`set local pg_trgm.word_similarity_threshold = 0.45`;
-      return tx<(Omit<SchoolHit, "country"> & { country: string | null })[]>`
-        with q as (select lower(immutable_unaccent(${q})) as q)
-        select s.id, s.name,
-               (select string_agg(country, ', ' order by country) from school_locations l where l.school = s.name) as country,
-               (select count(*)::int from mathematicians m where m.school = s.name) as mathematicians
-        from schools s, q
-        where s.search_name like '%' || replace(q.q, ' ', '%') || '%' or q.q <% s.search_name
-        order by s.search_name like replace(q.q, ' ', '%') || '%' desc,
-                 word_similarity(q.q, s.search_name) desc,
-                 mathematicians desc
-        limit ${limit}`;
-    });
+    const sql = c.var.sql;
+    const match = nameMatch(sql, sql`s.search_name`, q);
+    const rows = await sql<(Omit<SchoolHit, "country"> & { country: string | null })[]>`
+      select s.id, s.name,
+             (select string_agg(country, ', ' order by country) from school_locations l where l.school = s.name) as country,
+             (select count(*)::int from mathematicians m where m.school = s.name) as mathematicians
+      from schools s
+      where ${match.where}
+      order by ${match.prefix} desc, ${match.similarity} desc, mathematicians desc
+      limit ${limit}`;
     return c.json<SchoolHit[]>(rows.map((r) => ({ ...r, country: r.country && r.country.split(", ").map(prettyCountry).join(", ") })));
   });
 
