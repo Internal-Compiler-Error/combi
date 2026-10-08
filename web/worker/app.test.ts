@@ -140,6 +140,11 @@ test("flows only count links that cross a border", async () => {
   expect(await json<Flows>("/flows")).toEqual({ flows: [], decades: [] });
 });
 
+test("people fetches several by ID and skips unknown ones", async () => {
+  expect((await json<Person[]>("/people?ids=1,6,999,x")).map((p) => p.id).sort()).toEqual([1, 6]);
+  expect(await json<Person[]>("/people")).toEqual([]);
+});
+
 test("helpers", () => {
   expect(normalizeQuery("  50%   off_by\\one ")).toBe("50\\% off\\_by\\\\one");
 });

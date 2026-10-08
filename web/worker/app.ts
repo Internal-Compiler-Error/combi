@@ -457,6 +457,15 @@ export function createApp({ fetchPage, fetchSearch }: { fetchPage?: FetchPage; f
     });
   });
 
+  /** Several people at once, for lists picked elsewhere (the home page's famous names); unknown IDs are left out. */
+  app.get("/people", async (c) => {
+    const ids = (c.req.query("ids") ?? "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < 2 ** 31).slice(0, 100);
+    if (!ids.length) return c.json<Person[]>([]);
+    // an array literal, as in the graph query: the ids are integers checked above
+    const rows = await c.var.sql<PersonRow[]>`select ${personColumns(c.var.sql)} from mathematicians m where m.id = any(${`{${ids.join(",")}}`}::int[])`;
+    return c.json<Person[]>(rows.map(toPerson));
+  });
+
   /** The advisors with the most students on record, as starting points for browsing. */
   app.get("/notable", async (c) => {
     const rows = await c.var.sql<PersonRow[]>`

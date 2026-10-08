@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link } from "react-router";
 import { degreeLine, useNotable, useStats } from "../api/client";
 import { SearchBox } from "../components/SearchBox";
+import { FamousPicks } from "../components/FamousPicks";
 import { CountUp, rise } from "../motion";
 
 export function HomePage() {
@@ -55,6 +56,8 @@ export function HomePage() {
         )}
         {stats.isError && <p className="error">Couldn’t reach the API: {stats.error.message}</p>}
       </section>
+
+      <FamousPicks />
 
       {notable.data && notable.data.length > 0 && (
         <section className="notable">

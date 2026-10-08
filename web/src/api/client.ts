@@ -73,6 +73,9 @@ export const useFlows = (decade: number | null) =>
 export const useRelation = (a: number | null, b: number | null) =>
   useQuery({ queryKey: ["relation", a, b], queryFn: () => get<Relation>("/relation", { a: a!, b: b! }), enabled: a !== null && b !== null });
 
+export const usePeople = (ids: number[]) =>
+  useQuery({ queryKey: ["people", ids], queryFn: () => get<Person[]>("/people", { ids: ids.join(",") }), enabled: ids.length > 0, placeholderData: keepPreviousData });
+
 export const usePerson = (id: number, enabled = true) =>
   useQuery({ queryKey: ["person", id], queryFn: () => get<PersonDetail>(`/mathematicians/${id}`), enabled });
 
