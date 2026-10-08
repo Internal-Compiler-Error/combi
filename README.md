@@ -61,7 +61,7 @@ alike), and skips pages that aren't due.
 ```sh
 # everyone connected to Knuth: his students' trees and his advisors' line
 DATABASE_URL=… cargo run --release -p combi-scraper -- walk 10416
-# every ID MGP has (it runs to about 350,000); hours, at MGP's pace
+# every ID MGP has (it runs to about 350,000), in random order; hours, at MGP's pace
 DATABASE_URL=… cargo run --release -p combi-scraper -- sweep
 ```
 

@@ -8,6 +8,7 @@ mod parser;
 mod store;
 
 use clap::{Args, Parser, Subcommand};
+use rand::seq::SliceRandom;
 use sqlx::postgres::PgPoolOptions;
 
 use crate::crawler::Crawler;
@@ -40,12 +41,16 @@ enum Command {
         #[arg(long)]
         up: bool,
     },
-    /// Crawl every ID in a range, without following anyone; MGP's IDs run to about 350,000
+    /// Crawl every ID in a range, without following anyone; MGP's IDs run to about 350,000.
+    /// IDs go in random order, so a sweep that stops early has covered the whole range evenly.
     Sweep {
         #[arg(long, default_value_t = 1)]
         from: i32,
         #[arg(long, default_value_t = 360_000)]
         to: i32,
+        /// go through the IDs in order instead
+        #[arg(long)]
+        in_order: bool,
     },
 }
 
@@ -90,7 +95,13 @@ async fn main() -> color_eyre::Result<()> {
             let ranged = range.into_iter().flat_map(|(a, b)| a..=b);
             ids.into_iter().chain(ranged).map(|id| (id, direction)).collect()
         }
-        Command::Sweep { from, to } => (from..=to).map(|id| (id, Direction::Neither)).collect(),
+        Command::Sweep { from, to, in_order } => {
+            let mut ids: Vec<_> = (from..=to).map(|id| (id, Direction::Neither)).collect();
+            if !in_order {
+                ids.shuffle(&mut rand::thread_rng());
+            }
+            ids
+        }
     };
     if start.is_empty() {
         color_eyre::eyre::bail!("nothing to crawl: give IDs or --range");
