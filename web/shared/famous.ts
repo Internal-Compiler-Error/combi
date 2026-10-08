@@ -1,5 +1,6 @@
 // Mathematicians the home page picks from at random: classics an undergraduate meets in their
-// courses, and modern names a researcher would know. IDs are MGP's, each checked against its search.
+// courses, modern names a researcher would know, and computer scientists and their neighbours in
+// logic and information theory. IDs are MGP's, each checked against its search.
 
 export type Famous = { id: number; name: string; known: string };
 
@@ -27,7 +28,6 @@ export const CLASSICS: Famous[] = [
   { id: 86693, name: "Henri Lebesgue", known: "Lebesgue integration" },
   { id: 53213, name: "John von Neumann", known: "Game theory, the stored-program computer" },
   { id: 19539, name: "Kurt Gödel", known: "The incompleteness theorems" },
-  { id: 8014, name: "Alan Turing", known: "Turing machines, computability" },
   { id: 10480, name: "Andrey Kolmogorov", known: "The axioms of probability" },
   { id: 7373, name: "Hermann Weyl", known: "Representation theory, gauge theory" },
   { id: 17806, name: "G. H. Hardy", known: "Analytic number theory" },
@@ -55,7 +55,6 @@ export const MODERN: Famous[] = [
   { id: 18849, name: "John Horton Conway", known: "The Game of Life, surreal numbers" },
   { id: 31056, name: "Robert Langlands", known: "The Langlands program" },
   { id: 61289, name: "Pierre Deligne", known: "The Weil conjectures" },
-  { id: 42920, name: "Claude Shannon", known: "Information theory" },
   { id: 4834, name: "Karen Uhlenbeck", known: "Geometric analysis, gauge theory" },
   { id: 63054, name: "Jean Bourgain", known: "Harmonic analysis, Banach spaces" },
   { id: 201884, name: "Maryna Viazovska", known: "Sphere packing in dimension 8" },
@@ -66,11 +65,45 @@ export const MODERN: Famous[] = [
   { id: 14999, name: "Mikhael Gromov", known: "Geometric group theory" },
   { id: 44561, name: "Ingrid Daubechies", known: "Wavelets" },
   { id: 60791, name: "Benoit Mandelbrot", known: "Fractals" },
-  { id: 10416, name: "Donald Knuth", known: "The Art of Computer Programming, TeX" },
   { id: 6445, name: "Errett Bishop", known: "Constructive analysis" },
-  { id: 20640, name: "Per Martin-Löf", known: "Intuitionistic type theory" },
   { id: 45627, name: "Anne Troelstra", known: "Intuitionism, constructive logic" },
-  { id: 137164, name: "Thierry Coquand", known: "The calculus of constructions" },
   { id: 28125, name: "Vladimir Voevodsky", known: "Univalent foundations, motivic cohomology" },
   { id: 53212, name: "Douglas Bridges", known: "Constructive analysis" },
+];
+
+export const COMPUTING: Famous[] = [
+  { id: 8014, name: "Alan Turing", known: "Turing machines, computability" },
+  { id: 8011, name: "Alonzo Church", known: "The lambda calculus" },
+  { id: 8012, name: "Stephen Kleene", known: "Recursion theory, regular expressions" },
+  { id: 7398, name: "Haskell Curry", known: "Combinatory logic, the Curry–Howard correspondence" },
+  { id: 37357, name: "Emil Post", known: "Computability, Post's correspondence problem" },
+  { id: 42920, name: "Claude Shannon", known: "Information theory" },
+  { id: 10416, name: "Donald Knuth", known: "The Art of Computer Programming, TeX" },
+  { id: 45747, name: "Edsger Dijkstra", known: "Shortest paths, structured programming" },
+  { id: 22145, name: "John McCarthy", known: "Lisp, artificial intelligence" },
+  { id: 8024, name: "Dana Scott", known: "Domain theory, automata" },
+  { id: 14011, name: "Stephen Cook", known: "NP-completeness" },
+  { id: 25275, name: "Richard Karp", known: "NP-complete problems, network flows" },
+  { id: 35871, name: "Leslie Lamport", known: "Distributed systems, LaTeX" },
+  { id: 8023, name: "Michael Rabin", known: "Nondeterministic automata, randomized algorithms" },
+  { id: 53460, name: "Robert Tarjan", known: "Graph algorithms, data structures" },
+  { id: 61932, name: "Barbara Liskov", known: "Data abstraction, the substitution principle" },
+  { id: 18757, name: "Leslie Valiant", known: "PAC learning, counting complexity" },
+  { id: 82100, name: "Avi Wigderson", known: "Complexity theory, randomness" },
+  { id: 77138, name: "Silvio Micali", known: "Zero-knowledge proofs" },
+  { id: 50081, name: "Ronald Rivest", known: "RSA" },
+  { id: 19271, name: "Adi Shamir", known: "RSA, secret sharing" },
+  { id: 13373, name: "Manuel Blum", known: "Complexity theory, CAPTCHAs" },
+  { id: 10404, name: "Juris Hartmanis", known: "Computational complexity" },
+  { id: 46289, name: "Christos Papadimitriou", known: "Computational complexity, algorithmic game theory" },
+  { id: 18997, name: "Amir Pnueli", known: "Temporal logic" },
+  { id: 61847, name: "Niklaus Wirth", known: "Pascal" },
+  { id: 50229, name: "Philip Wadler", known: "Haskell, functional programming" },
+  { id: 50068, name: "Robert Harper", known: "Programming language theory, Standard ML" },
+  { id: 20640, name: "Per Martin-Löf", known: "Intuitionistic type theory" },
+  { id: 137164, name: "Thierry Coquand", known: "The calculus of constructions" },
+  { id: 50063, name: "Edmund Clarke", known: "Model checking" },
+  { id: 44128, name: "Jeffrey Ullman", known: "Compilers, databases" },
+  { id: 50071, name: "Geoffrey Hinton", known: "Deep learning" },
+  { id: 70481, name: "Judea Pearl", known: "Causal inference, Bayesian networks" },
 ];

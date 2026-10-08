@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import { CLASSICS, MODERN, type Famous } from "../../shared/famous";
+import { CLASSICS, COMPUTING, MODERN, type Famous } from "../../shared/famous";
 import { degreeLine, usePeople, type Person } from "../api/client";
 import { rise } from "../motion";
 
@@ -16,11 +16,14 @@ function sample<T>(xs: T[], n: number): T[] {
   return pool.slice(0, n);
 }
 
-/** A random few classics and modern names, freshly drawn on each visit and on Shuffle. */
+/** A random few from each list, freshly drawn on each visit and on Shuffle. */
 export function FamousPicks() {
   const [draw, setDraw] = useState(0);
-  const picks = useMemo(() => ({ classics: sample(CLASSICS, SHOWN), modern: sample(MODERN, SHOWN) }), [draw]); // eslint-disable-line react-hooks/exhaustive-deps
-  const people = usePeople([...picks.classics, ...picks.modern].map((f) => f.id));
+  const picks = useMemo(
+    () => ({ classics: sample(CLASSICS, SHOWN), modern: sample(MODERN, SHOWN), computing: sample(COMPUTING, SHOWN) }),
+    [draw], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const people = usePeople([...picks.classics, ...picks.modern, ...picks.computing].map((f) => f.id));
   const known = new Map((people.data ?? []).map((p) => [p.id, p]));
 
   return (
@@ -33,6 +36,7 @@ export function FamousPicks() {
       </div>
       <Group title="Classics" picks={picks.classics} known={known} draw={draw} />
       <Group title="Modern" picks={picks.modern} known={known} draw={draw} />
+      <Group title="Computer science and nearby" picks={picks.computing} known={known} draw={draw} />
     </section>
   );
 }
