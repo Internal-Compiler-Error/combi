@@ -32,6 +32,10 @@ export const CLASSICS: Famous[] = [
   { id: 7373, name: "Hermann Weyl", known: "Representation theory, gauge theory" },
   { id: 17806, name: "G. H. Hardy", known: "Analytic number theory" },
   { id: 54440, name: "Jacob Bernoulli", known: "The law of large numbers" },
+  { id: 17982, name: "Leopold Kronecker", known: "Algebraic number theory, finitism" },
+  { id: 19467, name: "L. E. J. Brouwer", known: "Intuitionism, the fixed-point theorem" },
+  { id: 45623, name: "Arend Heyting", known: "Intuitionistic logic" },
+  { id: 13982, name: "Andrey Markov Jr.", known: "Constructive mathematics, Markov's principle" },
 ];
 
 export const MODERN: Famous[] = [
@@ -63,4 +67,10 @@ export const MODERN: Famous[] = [
   { id: 44561, name: "Ingrid Daubechies", known: "Wavelets" },
   { id: 60791, name: "Benoit Mandelbrot", known: "Fractals" },
   { id: 10416, name: "Donald Knuth", known: "The Art of Computer Programming, TeX" },
+  { id: 6445, name: "Errett Bishop", known: "Constructive analysis" },
+  { id: 20640, name: "Per Martin-Löf", known: "Intuitionistic type theory" },
+  { id: 45627, name: "Anne Troelstra", known: "Intuitionism, constructive logic" },
+  { id: 137164, name: "Thierry Coquand", known: "The calculus of constructions" },
+  { id: 28125, name: "Vladimir Voevodsky", known: "Univalent foundations, motivic cohomology" },
+  { id: 53212, name: "Douglas Bridges", known: "Constructive analysis" },
 ];
