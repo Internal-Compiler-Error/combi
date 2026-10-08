@@ -1,5 +1,6 @@
 //! Fetching pages from MGP, every request going through the limiter.
 
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
 
 use color_eyre::eyre::eyre;
@@ -18,6 +19,8 @@ const BACKOFF: Duration = Duration::from_secs(10);
 pub struct Mgp {
     client: Client,
     limiter: Limiter,
+    /// requests tried again after a failure
+    pub retries: AtomicUsize,
 }
 
 impl Mgp {
@@ -27,7 +30,7 @@ impl Mgp {
             .timeout(TIMEOUT)
             .pool_idle_timeout(Duration::from_secs(30))
             .build()?;
-        Ok(Self { client, limiter })
+        Ok(Self { client, limiter, retries: AtomicUsize::new(0) })
     }
 
     pub fn limiter(&self) -> &Limiter {
@@ -39,6 +42,9 @@ impl Mgp {
         let url = format!("https://www.mathgenealogy.org/id.php?id={id}");
         let mut last = None;
         for attempt in 0..TRIES {
+            if attempt > 0 {
+                self.retries.fetch_add(1, Relaxed);
+            }
             let permit = self.limiter.acquire().await;
             let started = Instant::now();
             let result = self.client.get(&url).send().await;

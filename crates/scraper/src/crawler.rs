@@ -89,7 +89,7 @@ impl Crawler {
             (q.todo.len(), q.seen.len())
         };
         info!(
-            "{fetched} fetched ({} changed), {} not due, {} not on MGP, {} errors | {per_minute:.0}/min, {} in flight of {:.1}, median {} vs idle {} | {todo} queued, {seen} seen",
+            "{fetched} fetched ({} changed), {} not due, {} not on MGP, {} errors | {per_minute:.0}/min, {} in flight of {:.1}, median {} vs idle {}, {} retries, {} pauses | {todo} queued, {seen} seen",
             s.changed.load(Relaxed),
             s.skipped.load(Relaxed),
             s.missing.load(Relaxed),
@@ -98,6 +98,8 @@ impl Crawler {
             l.limit,
             ms(l.median),
             ms(l.baseline),
+            self.mgp.retries.load(Relaxed),
+            l.pauses,
         );
         (Instant::now(), fetched)
     }

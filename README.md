@@ -68,8 +68,10 @@ DATABASE_URL=… cargo run --release -p combi-scraper -- sweep
 It finds MGP's pace on its own: it keeps more requests in flight while answers come back about
 as fast as they do when MGP is idle, eases off when they slow down, and halves and pauses on
 errors. `--max-rate` (default 10 a second) and `--max-in-flight` (default 16) are hard caps it
-never exceeds. Every 15 seconds it logs pages per minute, how many requests it has in flight, and
-MGP's median against idle response time.
+never exceeds. Its idea of MGP's idle response time follows faster answers at once but slower
+ones only gradually, so a server slowing under the crawl keeps counting as congested. Every 15
+seconds it logs pages per minute, requests in flight, MGP's median against idle response time,
+and how many requests were retried and how often MGP struggled enough to pause everything.
 
 ### Common tasks
 
