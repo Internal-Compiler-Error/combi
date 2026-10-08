@@ -153,8 +153,7 @@ h1, h2 { text-wrap: balance; }
 .notable-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 20px rgb(0 0 0 / 0.08); }
 .famous { display: flex; flex-direction: column; gap: 16px; }
 .famous-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.famous-group { display: flex; flex-direction: column; gap: 8px; }
-.famous-title { margin: 0; font: 600 18px var(--font-display); color: var(--ink-2); }
+.famous-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
 .famous-known { font-size: 13px; color: var(--ink-2); font-style: italic; }
 .notable-name { font-family: var(--font-display); font-weight: 600; font-size: 17px; line-height: 1.25; }
 .notable-count { margin-top: 6px; font-size: 13px; color: var(--ink-2); }

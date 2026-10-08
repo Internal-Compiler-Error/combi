@@ -466,6 +466,16 @@ export function createApp({ fetchPage, fetchSearch }: { fetchPage?: FetchPage; f
     return c.json<Person[]>(rows.map(toPerson));
   });
 
+  /** A few people at random whose own page has been crawled, so there's something to show for them. */
+  app.get("/random", async (c) => {
+    const n = clamp(intParam(c.req.query("n"), 6), 1, 24);
+    const sql = c.var.sql;
+    const rows = await sql<PersonRow[]>`
+      select ${personColumns(sql)} from mathematicians m
+      where m.id in (select page from crawl_schedule order by random() limit ${n})`;
+    return c.json<Person[]>(rows.map(toPerson));
+  });
+
   /** The advisors with the most students on record, as starting points for browsing. */
   app.get("/notable", async (c) => {
     const rows = await c.var.sql<PersonRow[]>`

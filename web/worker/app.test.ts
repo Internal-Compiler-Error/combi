@@ -145,6 +145,11 @@ test("people fetches several by ID and skips unknown ones", async () => {
   expect(await json<Person[]>("/people")).toEqual([]);
 });
 
+test("random picks people whose own page was crawled", async () => {
+  // the fixture has no crawl schedule, so there is no one to pick
+  expect(await json<Person[]>("/random?n=3")).toEqual([]);
+});
+
 test("helpers", () => {
   expect(normalizeQuery("  50%   off_by\\one ")).toBe("50\\% off\\_by\\\\one");
 });

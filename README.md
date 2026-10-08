@@ -118,6 +118,7 @@ To use a different database in development, set
 | `GET /api/relation?a=&b=` | Two people's nearest shared academic ancestor and the shortest line down from it to each |
 | `GET /api/walks/{id}` | Progress of a walk started by a crawl: pages fetched, already up to date, not on MGP, and still to visit |
 | `GET /api/people?ids=` | Several people by MGP ID (up to 100), leaving out any not in the database |
+| `GET /api/random?n=` | A few people at random (up to 24) whose own page has been crawled |
 | `GET /api/stats` | Counts for the whole database |
 | `GET /api/notable` | The 12 people with the most students on record |
 

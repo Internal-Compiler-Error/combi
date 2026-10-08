@@ -76,6 +76,10 @@ export const useRelation = (a: number | null, b: number | null) =>
 export const usePeople = (ids: number[]) =>
   useQuery({ queryKey: ["people", ids], queryFn: () => get<Person[]>("/people", { ids: ids.join(",") }), enabled: ids.length > 0, placeholderData: keepPreviousData });
 
+/** Fresh people on every `draw`, so Shuffle brings new ones. */
+export const useRandomPeople = (n: number, draw: number, enabled: boolean) =>
+  useQuery({ queryKey: ["random", n, draw], queryFn: () => get<Person[]>("/random", { n }), enabled, staleTime: Infinity, placeholderData: keepPreviousData });
+
 export const usePerson = (id: number, enabled = true) =>
   useQuery({ queryKey: ["person", id], queryFn: () => get<PersonDetail>(`/mathematicians/${id}`), enabled });
 

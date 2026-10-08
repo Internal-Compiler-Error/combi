@@ -151,6 +151,12 @@ describe("crawl", () => {
     expect(r.pathB.map((p) => p.id)).toEqual([10416, 47202]);
   });
 
+  test("random picks from crawled pages", async () => {
+    const picked = (await (await app.request("/api/random?n=50", {}, env)).json()) as { id: number }[];
+    expect(picked.length).toBeGreaterThan(0);
+    expect(picked.map((p) => p.id)).toContain(10416);
+  });
+
   test("rejects IDs out of range", async () => expect((await post(0)).status).toBe(400));
 });
 
