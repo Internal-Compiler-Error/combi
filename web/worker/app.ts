@@ -110,8 +110,18 @@ function nameMatch(sql: Sql, column: postgres.PendingQuery<postgres.Row[]>, q: s
   const short = q.replace(/\s/g, "").length < 3;
   return {
     where: short ? sql`${column} like ${words} || '%'` : sql`(${column} like '%' || ${words} || '%' or ${query} <% ${column})`,
-    prefix: sql`${column} like ${words} || '%'`,
-    similarity: sql`word_similarity(${query}, ${column})`,
+    /**
+     * How good a hit is: mostly how well the name matches; then a bonus for ending with the query,
+     * since people search by family name ("gauss" means Carl Friedrich Gauß before Gauss Cordeiro),
+     * a smaller one for starting with it, and a little for how big a figure they are (`size`, e.g.
+     * their number of students). Size only reorders similarly good matches: a half match would need
+     * ~150 times the students to pass an exact one.
+     */
+    score: (size: postgres.PendingQuery<postgres.Row[]>) => sql`
+      word_similarity(${query}, ${column})
+      + case when ${column} like '%' || ${words} then 0.1 else 0 end
+      + case when ${column} like ${words} || '%' then 0.05 else 0 end
+      + 0.1 * ln(1 + ${size})`,
   };
 }
 
@@ -158,12 +168,18 @@ export function createApp({ fetchPage, fetchSearch }: { fetchPage?: FetchPage; f
     const id = /^\d+$/.test(q) && Number(q) < 2 ** 31 ? Number(q) : null;
     const [exact, named] = await Promise.all([
       id === null ? [] : sql<PersonRow[]>`select ${personColumns(sql)} from mathematicians m where m.id = ${id}`,
+      // rank on ids alone, so a person's full columns are only worked out for the few returned
       sql<PersonRow[]>`
+        with hit as (
+          select m.id, ${match.score(sql`(select count(*) from advisor_relations sc where sc.advisor = m.id)`)} as score
+          from mathematicians m
+          where ${match.where}
+          order by score desc, m.name
+          limit ${limit}
+        )
         select ${personColumns(sql)}
-        from mathematicians m
-        where ${match.where}
-        order by ${match.prefix} desc, ${match.similarity} desc, student_count desc, m.name
-        limit ${limit}`,
+        from hit join mathematicians m on m.id = hit.id
+        order by hit.score desc, m.name`,
     ]);
     const rows = [...exact, ...named.filter((r) => r.id !== id)].slice(0, limit);
     return c.json<Person[]>(rows.map(toPerson));
@@ -386,13 +402,18 @@ export function createApp({ fetchPage, fetchSearch }: { fetchPage?: FetchPage; f
     const sql = c.var.sql;
     const match = nameMatch(sql, sql`s.search_name`, q);
     const rows = await sql<(Omit<SchoolHit, "country"> & { country: string | null })[]>`
+      with hit as (
+        select s.id, ${match.score(sql`(select count(*) from mathematicians m where m.school = s.name)`)} as score
+        from schools s
+        where ${match.where}
+        order by score desc, s.name
+        limit ${limit}
+      )
       select s.id, s.name,
              (select string_agg(country, ', ' order by country) from school_locations l where l.school = s.name) as country,
              (select count(*)::int from mathematicians m where m.school = s.name) as mathematicians
-      from schools s
-      where ${match.where}
-      order by ${match.prefix} desc, ${match.similarity} desc, mathematicians desc
-      limit ${limit}`;
+      from hit join schools s on s.id = hit.id
+      order by hit.score desc, s.name`;
     return c.json<SchoolHit[]>(rows.map((r) => ({ ...r, country: r.country && r.country.split(", ").map(prettyCountry).join(", ") })));
   });
 
