@@ -8,6 +8,7 @@ demand from the site itself. It runs on Cloudflare Workers.
 
 | Path | What it is |
 |---|---|
+| `crates/scraper` | `combi-scraper` (Rust): crawls MGP in bulk to fill the database, adapting to MGP's pace |
 | `migrations/` | Database schema (`sqlx migrate`) |
 | `web/src` | The website: Vite, React, TypeScript, TanStack Query, d3 for the radial family tree and the world map (`/map`, Natural Earth outlines from `world-atlas`) |
 | `web/worker` | The API: a Cloudflare Worker (Hono + postgres.js) serving `/api/*`, reaching Postgres through Hyperdrive. `crawl.ts` fetches and parses MGP pages |
@@ -50,12 +51,33 @@ said: unchanged, the page waits twice as long before the next check; changed, ha
 recent students, and up to 180 days for settled ones. A walk follows pages that aren't due
 through the database, so it still reaches everyone below them.
 
+### Crawl in bulk
+
+`crates/scraper` (`combi-scraper`, Rust) fills the database much faster than visitors' crawl
+buttons can, for bootstrapping. It stores pages exactly as the Worker does (its parser is checked
+against the Worker's on the saved pages in `web/worker/test/fixtures/mgp`, so both hash a page
+alike), and skips pages that aren't due.
+
+```sh
+# everyone connected to Knuth: his students' trees and his advisors' line
+DATABASE_URL=… cargo run --release -p combi-scraper -- walk 10416
+# every ID MGP has (it runs to about 350,000); hours, at MGP's pace
+DATABASE_URL=… cargo run --release -p combi-scraper -- sweep
+```
+
+It finds MGP's pace on its own: it keeps more requests in flight while answers come back about
+as fast as they do when MGP is idle, eases off when they slow down, and halves and pauses on
+errors. `--max-rate` (default 10 a second) and `--max-in-flight` (default 16) are hard caps it
+never exceeds. Every 15 seconds it logs pages per minute, how many requests it has in flight, and
+MGP's median against idle response time.
+
 ### Common tasks
 
 | Task | Command |
 |---|---|
 | API tests (needs `db` running) | `npm --prefix web test` |
 | Typecheck the site, the worker and the configs | `npm --prefix web run typecheck` |
+| Crawler tests | `cargo test -p combi-scraper` |
 | Add a migration | `docker compose run --rm dev sqlx migrate add -r <name>` |
 
 The API tests create throwaway databases with every migration applied, load

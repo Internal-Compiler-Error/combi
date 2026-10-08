@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import postgres from "postgres";
 import { afterAll, describe, expect, inject, test, vi } from "vitest";
@@ -58,6 +58,17 @@ describe("parsePage", () => {
   });
 
   test("an ID MGP doesn't have", () => expect(parsePage(1, missing)).toBeNull());
+
+  // The Rust crawler checks its parser against the same files, so both hash a page alike.
+  // UPDATE_GOLDEN=1 rewrites them after an intended change to what a page parses to.
+  test("parses pages to the golden JSON the Rust crawler also checks", () => {
+    for (const [id, name] of [[10416, "knuth"], [135101, "rajesh"], [1, "Tai-Yih"], [2, "abu"]] as const) {
+      const json = JSON.stringify(parsePage(id, fixture(name)));
+      const path = join(import.meta.dirname, "test/fixtures/mgp", `${name}.parsed.json`);
+      if (process.env.UPDATE_GOLDEN) writeFileSync(path, `${json}\n`);
+      expect(json).toBe(readFileSync(path, "utf8").trimEnd());
+    }
+  });
 
   test("a year that can't be right is unknown", () => {
     expect(parsePage(261324, fixture("knuth").replace(">1963</span>", ">200</span>"))!.year).toBeNull();
