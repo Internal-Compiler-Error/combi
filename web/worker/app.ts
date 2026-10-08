@@ -299,13 +299,20 @@ export function createApp({ fetchPage, fetchSearch }: { fetchPage?: FetchPage; f
   });
 
   app.get("/stats", async (c) => {
-    const [s] = await c.var.sql<[Omit<Stats, "last_scraped"> & { last_scraped: Date | null }]>`
-      select (select count(*)::int from mathematicians) as mathematicians,
-             (select count(*)::int from advisor_relations) as relations,
+    // Counting hundreds of thousands of rows on every home page visit is a full scan each time;
+    // Postgres's own row estimate (kept fresh by autovacuum) is plenty for a headline number. A table
+    // that has never been analyzed reports -1, so small new databases fall back to counting.
+    const estimate = (table: string) => sql`
+      (select case when reltuples >= 0 then reltuples::int else (select count(*)::int from ${sql(table)}) end
+       from pg_class where oid = ${table}::regclass)`;
+    const sql = c.var.sql;
+    const [s] = await sql<[Omit<Stats, "last_scraped"> & { last_scraped: Date | null }]>`
+      select ${estimate("mathematicians")} as mathematicians,
+             ${estimate("advisor_relations")} as relations,
              (select count(*)::int from countries) as countries,
              (select min(graduating_year) from mathematicians) as first_year,
              (select max(graduating_year) from mathematicians) as last_year,
-             (select max(date) from scrape_logs where result = 'success') as last_scraped`;
+             (select date from scrape_logs where result = 'success' order by id desc limit 1) as last_scraped`;
     return c.json<Stats>({ ...s, last_scraped: s.last_scraped ? new Date(s.last_scraped).toISOString() : null });
   });
 

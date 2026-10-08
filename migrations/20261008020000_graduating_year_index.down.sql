@@ -1,0 +1,1 @@
+drop index mathematicians_graduating_year_idx;
